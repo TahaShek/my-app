@@ -1,6 +1,6 @@
 import { getToken } from "firebase/messaging";
 import { messaging } from "./firebase";
-import { supabase } from "./supabase";
+import { supabase } from "./supabase/client";
 
 export async function registerFcmToken() {
   if (!messaging) return null;

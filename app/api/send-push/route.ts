@@ -1,6 +1,7 @@
 import admin from "firebase-admin";
 import { getMessaging } from "firebase-admin/messaging";
-import { supabase } from "../../../lib/supabase";
+import { NextRequest, NextResponse } from "next/server";
+import { supabase } from "../../../lib/supabase/client";
 
 // Environment variables are loaded from Vercel
 
@@ -21,10 +22,10 @@ export async function POST(req: Request) {
 
   // Fetch tokens from Supabase
   const { data: tokenRows } = await supabase.from("fcm_tokens").select("token");
-  const allTokens = tokenRows?.map((t) => t.token) || [];
+  const allTokens = tokenRows?.map((t: { token: string }) => t.token) || [];
   
   // Deduplicate tokens to prevent sending multiple notifications to the same device
-  const tokens = [...new Set(allTokens)].filter(Boolean);
+  const tokens = [...new Set(allTokens)].filter(Boolean) as string[];
 
   if (!tokens.length) {
     return new Response(
