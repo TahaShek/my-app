@@ -1,8 +1,6 @@
-"use client"
-// import type { Metadata } from "next";
-import { useEffect } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import ServiceWorkerRegister from "@/components/serviceWorkerRegister";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -20,25 +18,18 @@ const geistMono = Geist_Mono({
 // };
 
 
-
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
 
-  useEffect(() => {
-    if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/firebase-messaging-sw.js")
-        .then(() => console.log("Service Worker registered"))
-        .catch(console.error);
-    }
-  }, []);
   return (
     <html lang="en">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
+        <ServiceWorkerRegister />
         {children}
       </body>
     </html>

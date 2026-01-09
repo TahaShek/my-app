@@ -1,4 +1,6 @@
 "use client";
+import { useRouter } from "next/navigation";
+import { supabase } from "../lib/supabase/client";
 import { onMessage } from "firebase/messaging";
 import { messaging } from "../lib/firebase";
 
@@ -9,8 +11,20 @@ export default function HomePage() {
   const [isSending, setIsSending] = useState(false);
   const lastClickTime = useRef(0);
 
+  const router = useRouter();
+
+  const logout = async () => {
+    const { error } = await supabase.auth.signOut();
+
+    if (error) {
+      console.error("Logout failed:", error.message);
+      return;
+    }
+
+    router.push("/auth"); // or "/" depending on your app
+  };
   useEffect(() => {
-    registerFcmToken();
+    registerFcmToken(messaging);
   }, []);
 
   const sendNotification = async () => {
@@ -23,7 +37,7 @@ export default function HomePage() {
     lastClickTime.current = now;
 
     if (isSending) return;
-    
+
     setIsSending(true);
     try {
       const res = await fetch("/api/send-push", {
@@ -32,6 +46,7 @@ export default function HomePage() {
         body: JSON.stringify({
           title: "Hello from Next.js App Router!",
           body: "This is a push notification 🚀",
+          targetUserId: "11575a82-5810-4ff4-96cd-b4c1120097ba",
         }),
       });
 
@@ -45,37 +60,37 @@ export default function HomePage() {
   };
   useEffect(() => {
     if (!messaging) return;
-  
+
     onMessage(messaging, async (payload) => {
       // Get and increment notification count using IndexedDB (shared with service worker)
       const getAndIncrementCount = async () => {
         return new Promise<number>((resolve) => {
           const request = indexedDB.open("notificationDB", 1);
-          
+
           request.onupgradeneeded = (event: any) => {
             const db = event.target.result;
             if (!db.objectStoreNames.contains("counts")) {
               db.createObjectStore("counts");
             }
           };
-          
+
           request.onsuccess = (event: any) => {
             const db = event.target.result;
             const transaction = db.transaction(["counts"], "readwrite");
             const store = transaction.objectStore("counts");
-            
+
             const getRequest = store.get("notificationCount");
             getRequest.onsuccess = () => {
               const currentCount = getRequest.result || 0;
               const newCount = currentCount + 1;
-              
+
               const putRequest = store.put(newCount, "notificationCount");
               putRequest.onsuccess = () => {
                 resolve(newCount);
               };
             };
           };
-          
+
           request.onerror = () => {
             // Fallback to localStorage if IndexedDB fails
             const currentCount = parseInt(localStorage.getItem("notificationCount") || "0", 10);
@@ -85,22 +100,33 @@ export default function HomePage() {
           };
         });
       };
-      
+
       const notificationCount = await getAndIncrementCount();
-      
+
       console.log(`Foreground message received. Total notifications: ${notificationCount}`, payload);
       new Notification(payload.notification?.title || "Notification", {
         body: payload.notification?.body,
       });
     });
   }, []);
-  
+
 
   return (
     <div style={{ padding: 20 }}>
       <h1>Push Notification Demo</h1>
       <button onClick={sendNotification} disabled={isSending}>
         {isSending ? "Sending..." : "Send Notification"}
+      </button>
+      <button
+        onClick={logout}
+        style={{
+          background: "#e11d48",
+          color: "white",
+          padding: "8px 12px",
+          borderRadius: 6,
+        }}
+      >
+        Logout
       </button>
     </div>
   );

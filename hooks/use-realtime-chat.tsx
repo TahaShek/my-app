@@ -98,7 +98,7 @@ export function useRealtimeChat({ roomName }: UseRealtimeChatProps) {
   }, [roomName, user, roomId, supabase])
 
   const sendMessage = useCallback(
-    async (content: string) => {
+    async (content: string, targetUserId?: string) => {
       if (!channel || !isConnected || !user || !roomId) return
 
       const userName = user.user_metadata?.name || user.email?.split('@')[0] || 'Anonymous'
@@ -132,6 +132,23 @@ export function useRealtimeChat({ roomName }: UseRealtimeChatProps) {
         event: EVENT_MESSAGE_TYPE,
         payload: message,
       })
+
+      // Send push notification to target user if provided
+      if (targetUserId) {
+        try {
+          fetch('/api/send-push', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              title: `New message from ${userName}`,
+              body: content.length > 50 ? content.substring(0, 50) + '...' : content,
+              targetUserId: targetUserId
+            })
+          })
+        } catch (err) {
+          console.error('Error triggering push notification:', err)
+        }
+      }
     },
     [channel, isConnected, user, roomId]
   )

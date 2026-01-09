@@ -1,35 +1,100 @@
-import { getToken } from "firebase/messaging";
-import { messaging } from "./firebase";
+import { getToken, onMessage } from "firebase/messaging";
 import { supabase } from "./supabase/client";
 
-export async function registerFcmToken() {
-  if (!messaging) return null;
+export async function registerFcmToken(messaging: any) {
+  if (typeof window === "undefined") return null;
 
-  const permission = await Notification.requestPermission();
-  if (permission !== "granted") {
-    console.log("Notification permission denied");
+  try {
+    const registration = await navigator.serviceWorker.ready;
+
+    const token = await getToken(messaging, {
+      vapidKey: process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY,
+      serviceWorkerRegistration: registration,
+    });
+
+    if (token) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        // Upsert the token for the current user
+        // Note: This relies on the user_id column existing in fcm_tokens
+        const { error: upsertError } = await supabase
+          .from("fcm_tokens")
+          .upsert(
+            { token, user_id: user.id },
+            { onConflict: 'token' }
+          );
+
+        if (upsertError) {
+          console.warn("Could not link token to user. Database schema might need update.", upsertError);
+          // Fallback: just insert token without user_id if table doesn't have it yet
+          await supabase.from("fcm_tokens").upsert({ token }, { onConflict: 'token' });
+        }
+      } else {
+        // No user logged in, just store the token
+        await supabase.from("fcm_tokens").upsert({ token }, { onConflict: 'token' });
+      }
+    }
+
+    return token;
+  } catch (error) {
+    console.error("Error registering FCM token:", error);
     return null;
   }
+}
 
-  const token = await getToken(messaging, {
-    vapidKey: process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY,
-  });
+export function handleForegroundMessage(messaging: any) {
+  if (!messaging) return () => { };
 
-  console.log("FCM Token:", token);
+  return onMessage(messaging, async (payload) => {
+    // Get and increment notification count using IndexedDB (shared with service worker)
+    const getAndIncrementCount = async () => {
+      return new Promise<number>((resolve) => {
+        const request = indexedDB.open("notificationDB", 1);
 
-  if (token) {
-    // Check if token already exists to prevent duplicates
-    const { data: existing } = await supabase
-      .from("fcm_tokens")
-      .select("token")
-      .eq("token", token)
-      .single();
-    
-    // Only insert if token doesn't exist
-    if (!existing) {
-      await supabase.from("fcm_tokens").insert({ token });
+        request.onupgradeneeded = (event: any) => {
+          const db = event.target.result;
+          if (!db.objectStoreNames.contains("counts")) {
+            db.createObjectStore("counts");
+          }
+        };
+
+        request.onsuccess = (event: any) => {
+          const db = event.target.result;
+          const transaction = db.transaction(["counts"], "readwrite");
+          const store = transaction.objectStore("counts");
+
+          const getRequest = store.get("notificationCount");
+          getRequest.onsuccess = () => {
+            const currentCount = getRequest.result || 0;
+            const newCount = currentCount + 1;
+
+            const putRequest = store.put(newCount, "notificationCount");
+            putRequest.onsuccess = () => {
+              resolve(newCount);
+            };
+          };
+        };
+
+        request.onerror = () => {
+          // Fallback to localStorage if IndexedDB fails
+          const currentCount = parseInt(localStorage.getItem("notificationCount") || "0", 10);
+          const newCount = currentCount + 1;
+          localStorage.setItem("notificationCount", newCount.toString());
+          resolve(newCount);
+        };
+      });
+    };
+
+    const notificationCount = await getAndIncrementCount();
+
+    console.log(`Foreground message received. Total notifications: ${notificationCount}`, payload);
+
+    // Check if permission is granted
+    if (Notification.permission === "granted") {
+      new Notification(payload.notification?.title || "Notification", {
+        body: payload.notification?.body,
+        icon: '/favicon.ico', // Optional: add an icon
+      });
     }
-  }
-
-  return token;
+  });
 }

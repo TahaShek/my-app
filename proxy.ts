@@ -28,29 +28,25 @@ export async function proxy(req: NextRequest) {
     console.log('Error fetching session:', error.message)
   } else {
     console.log('User session:', session)
-    if (session) {
-      console.log('Access token:', session.access_token) // this is your JWT
-      console.log('Refresh token:', session.refresh_token)
-    }
   }
 
   const { pathname } = req.nextUrl
 
   // If user is authenticated and trying to access /auth, redirect to home
   if (session && pathname === '/auth') {
-    return NextResponse.redirect(new URL('/home', req.url))
+    return NextResponse.redirect(new URL('/', req.url))
   }
 
   // Redirect if not logged in (for protected routes)
   if (!session && pathname !== '/auth') {
     return NextResponse.redirect(new URL('/auth', req.url))
   }
-  
+
 
   return res
 }
 
 // Apply middleware to /home, protected routes, and /auth
 export const config = {
-  matcher: ['/home', '/dashboard/:path*', '/', '/auth'],
+  matcher: ['/', '/dashboard/:path*', '/auth', '/chat/:path*', '/test/:path*'],
 }

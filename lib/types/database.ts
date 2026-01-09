@@ -1,4 +1,11 @@
-// Database table types
+export interface Profile {
+  id: string
+  name: string | null
+  email: string | null
+  avatar_url: string | null
+  updated_at?: string
+  created_at?: string
+}
 export interface ChatRoom {
   id: string
   name: string
