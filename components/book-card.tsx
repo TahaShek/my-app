@@ -8,6 +8,7 @@ interface BookCardProps {
   book: Book
 }
 
+
 export function BookCard({ book }: BookCardProps) {
   return (
     <div className="group">

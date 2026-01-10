@@ -43,7 +43,7 @@ export default function LoginForm() {
     })
 
     if (result.error) {
-      setError(result.error || "Login failed. Please try again.")
+setError(result.error.message || "Login failed. Please try again.")
       setIsLoading(false)
     }
   }

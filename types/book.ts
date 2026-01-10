@@ -18,7 +18,7 @@ export interface Book {
   status: "available" | "exchanged" | "requested"
 
   // Gamification
-  points?: number   // ✅ ADD THIS
+  points?: number  
 
   createdAt: Date
 }

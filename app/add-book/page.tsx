@@ -1,8 +1,8 @@
 "use client"
 
-import type React from "react"
-
 import { useState } from "react"
+import { useForm } from "react-hook-form"
+import { zodResolver } from "@hookform/resolvers/zod"
 import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
 import { Button } from "@/components/ui/button"
@@ -11,56 +11,154 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { BookOpen, Upload, QrCode } from "lucide-react"
+import { BookOpen, Upload, QrCode, Loader2 } from "lucide-react"
 import { QRCodeGenerator } from "@/components/qr-code-generator"
+import { supabase } from "@/lib/supabase/client"
+import { useRouter } from "next/navigation"
+import { z } from 'zod'
+
+// Fix 1: Define the schema with proper typing
+const bookSchema = z.object({
+  title: z.string().min(1, 'Title is required').max(200),
+  author: z.string().min(1, 'Author is required').max(100),
+  genre: z.enum(['Fiction', 'Non-Fiction', 'Mystery', 'Romance', 'Science Fiction', 'Fantasy', 'Biography', 'History', 'Self-Help', 'Dystopian']),
+  condition: z.enum(['Excellent', 'Good', 'Fair', 'Poor']),
+  description: z.string().max(1000).optional(),
+  isbn: z.string().optional(),
+  publicationYear: z.coerce
+    .number()
+    .min(1000, 'Invalid year')
+    .max(new Date().getFullYear(), 'Year cannot be in the future')
+    .optional()
+    .nullable(),
+  location: z.string().max(200).optional(),
+  pointValue: z.coerce.number().min(1).max(1000),
+  language: z.string().optional(),
+})
+
+// Fix 2: Explicitly type the form data
+type BookFormData = {
+  title: string
+  author: string
+  genre: 'Fiction' | 'Non-Fiction' | 'Mystery' | 'Romance' | 'Science Fiction' | 'Fantasy' | 'Biography' | 'History' | 'Self-Help' | 'Dystopian'
+  condition: 'Excellent' | 'Good' | 'Fair' | 'Poor'
+  description?: string
+  isbn?: string
+  publicationYear?: number | null
+  location?: string
+  pointValue: number
+  language?: string
+}
+
+// Alternative: Use z.infer if you want Zod to infer the type
+// type BookFormData = z.infer<typeof bookSchema>
 
 export default function AddBookPage() {
-  const [title, setTitle] = useState("")
-  const [author, setAuthor] = useState("")
-  const [genre, setGenre] = useState("")
-  const [condition, setCondition] = useState("")
-  const [description, setDescription] = useState("")
-  const [isbn, setIsbn] = useState("")
-  const [publicationYear, setPublicationYear] = useState("")
-  const [location, setLocation] = useState("")
+  const [isLoading, setIsLoading] = useState(false)
   const [showQRCode, setShowQRCode] = useState(false)
   const [generatedBookId, setGeneratedBookId] = useState("")
+  const [error, setError] = useState<string | null>(null)
+  const router = useRouter()
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
+  // Fix 3: Use explicit typing for useForm
+  const {
+    register,
+    handleSubmit,
+    formState: { errors },
+    reset,
+    watch,
+    setValue,
+    control,
+  } = useForm<BookFormData>({
+    resolver: zodResolver(bookSchema),
+    defaultValues: {
+      genre: "Fiction",
+      condition: "Good",
+      pointValue: 50,
+      language: "English",
+    },
+    mode: "onBlur", // Validate on blur to prevent early validation errors
+  })
 
-    // Generate a mock book ID for QR code
-    const bookId = `book-${Date.now()}`
-    setGeneratedBookId(bookId)
-    setShowQRCode(true)
+  // Fix 4: Proper onSubmit handler with correct typing
+  const onSubmit = async (data: BookFormData) => {
+    setIsLoading(true)
+    setError(null)
 
-    console.log("[v0] Book added:", {
-      title,
-      author,
-      genre,
-      condition,
-      description,
-      isbn,
-      publicationYear,
-      location,
-      bookId,
-    })
+    try {
+      // Get current user
+      const { data: { user }, error: userError } = await supabase.auth.getUser()
+      
+      if (userError || !user) {
+        throw new Error("You must be logged in to add a book")
+      }
 
-    // In production, this would save to Supabase and then show the QR code
+      // Generate QR code data
+      const qrData = JSON.stringify({
+        bookTitle: data.title,
+        author: data.author,
+        ownerId: user.id,
+        timestamp: new Date().toISOString(),
+      })
+
+      // Prepare book data for insertion
+      const bookData = {
+        title: data.title,
+        author: data.author,
+        genre: data.genre,
+        condition: data.condition,
+        description: data.description || null,
+        publication_year: data.publicationYear || null,
+        owner_id: user.id,
+        point_value: data.pointValue,
+        language: data.language || 'English',
+        qr_code: qrData,
+        available: true,
+        tags: [],
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }
+
+      // Create book in database
+      const { data: newBook, error: dbError } = await supabase
+        .from('books')
+        .insert([bookData])
+        .select()
+        .single()
+
+      if (dbError) throw dbError
+
+      if (!newBook) {
+        throw new Error("Failed to create book")
+      }
+
+      // Set the generated book ID for QR code display
+      setGeneratedBookId(newBook.id)
+      setShowQRCode(true)
+
+    } catch (error) {
+      console.error("Error adding book:", error)
+      setError(error instanceof Error ? error.message : "Failed to add book")
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   const handleReset = () => {
-    setTitle("")
-    setAuthor("")
-    setGenre("")
-    setCondition("")
-    setDescription("")
-    setIsbn("")
-    setPublicationYear("")
-    setLocation("")
+    reset()
     setShowQRCode(false)
     setGeneratedBookId("")
+    setError(null)
   }
+
+  const handleAddAnother = () => {
+    handleReset()
+    router.refresh()
+  }
+
+  const genre = watch("genre")
+  const condition = watch("condition")
+  const pointValue = watch("pointValue")
 
   if (showQRCode) {
     return (
@@ -69,7 +167,11 @@ export default function AddBookPage() {
         <main className="flex-1 py-12">
           <div className="container mx-auto px-4">
             <div className="max-w-2xl mx-auto">
-              <QRCodeGenerator bookId={generatedBookId} bookTitle={title} onAddAnother={handleReset} />
+              <QRCodeGenerator 
+                bookId={generatedBookId} 
+                bookTitle={watch("title")} 
+                onAddAnother={handleAddAnother} 
+              />
             </div>
           </div>
         </main>
@@ -98,10 +200,16 @@ export default function AddBookPage() {
             <Card className="border-2">
               <CardHeader>
                 <CardTitle className="text-2xl font-serif">Book Details</CardTitle>
-                <CardDescription>Fill in the information about the book you'd like to share</CardDescription>
+                <CardDescription>Fill in the information about the book you&apos;d like to share</CardDescription>
               </CardHeader>
               <CardContent>
-                <form onSubmit={handleSubmit} className="space-y-6">
+                {error && (
+                  <div className="mb-6 p-4 bg-destructive/10 border border-destructive/20 rounded-lg">
+                    <p className="text-destructive text-sm font-medium">{error}</p>
+                  </div>
+                )}
+
+                <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
                   <div className="grid sm:grid-cols-2 gap-6">
                     <div className="space-y-2 sm:col-span-2">
                       <Label htmlFor="title">
@@ -111,11 +219,13 @@ export default function AddBookPage() {
                         id="title"
                         type="text"
                         placeholder="Enter book title"
-                        value={title}
-                        onChange={(e) => setTitle(e.target.value)}
-                        required
+                        {...register("title")}
                         className="h-11"
+                        disabled={isLoading}
                       />
+                      {errors.title && (
+                        <p className="text-sm text-destructive">{errors.title.message}</p>
+                      )}
                     </div>
 
                     <div className="space-y-2">
@@ -126,30 +236,39 @@ export default function AddBookPage() {
                         id="author"
                         type="text"
                         placeholder="Author name"
-                        value={author}
-                        onChange={(e) => setAuthor(e.target.value)}
-                        required
+                        {...register("author")}
                         className="h-11"
+                        disabled={isLoading}
                       />
+                      {errors.author && (
+                        <p className="text-sm text-destructive">{errors.author.message}</p>
+                      )}
                     </div>
 
                     <div className="space-y-2">
-                      <Label htmlFor="isbn">ISBN</Label>
+                      <Label htmlFor="isbn">ISBN (Optional)</Label>
                       <Input
                         id="isbn"
                         type="text"
                         placeholder="ISBN number"
-                        value={isbn}
-                        onChange={(e) => setIsbn(e.target.value)}
+                        {...register("isbn")}
                         className="h-11"
+                        disabled={isLoading}
                       />
+                      {errors.isbn && (
+                        <p className="text-sm text-destructive">{errors.isbn.message}</p>
+                      )}
                     </div>
 
                     <div className="space-y-2">
                       <Label htmlFor="genre">
                         Genre <span className="text-destructive">*</span>
                       </Label>
-                      <Select value={genre} onValueChange={setGenre} required>
+                      <Select
+                        value={genre}
+                        onValueChange={(value) => setValue("genre", value as BookFormData["genre"])}
+                        disabled={isLoading}
+                      >
                         <SelectTrigger id="genre" className="h-11">
                           <SelectValue placeholder="Select genre" />
                         </SelectTrigger>
@@ -166,13 +285,20 @@ export default function AddBookPage() {
                           <SelectItem value="Dystopian">Dystopian</SelectItem>
                         </SelectContent>
                       </Select>
+                      {errors.genre && (
+                        <p className="text-sm text-destructive">{errors.genre.message}</p>
+                      )}
                     </div>
 
                     <div className="space-y-2">
                       <Label htmlFor="condition">
                         Condition <span className="text-destructive">*</span>
                       </Label>
-                      <Select value={condition} onValueChange={setCondition} required>
+                      <Select
+                        value={condition}
+                        onValueChange={(value) => setValue("condition", value as BookFormData["condition"])}
+                        disabled={isLoading}
+                      >
                         <SelectTrigger id="condition" className="h-11">
                           <SelectValue placeholder="Select condition" />
                         </SelectTrigger>
@@ -183,44 +309,112 @@ export default function AddBookPage() {
                           <SelectItem value="Poor">Poor - Heavy wear</SelectItem>
                         </SelectContent>
                       </Select>
+                      {errors.condition && (
+                        <p className="text-sm text-destructive">{errors.condition.message}</p>
+                      )}
                     </div>
 
                     <div className="space-y-2">
-                      <Label htmlFor="year">Publication Year</Label>
+                      <Label htmlFor="publicationYear">Publication Year (Optional)</Label>
                       <Input
-                        id="year"
+                        id="publicationYear"
                         type="number"
                         placeholder="e.g., 2020"
-                        value={publicationYear}
-                        onChange={(e) => setPublicationYear(e.target.value)}
+                        {...register("publicationYear", {
+                          setValueAs: (v) => v === "" ? null : Number(v)
+                        })}
                         min="1000"
                         max={new Date().getFullYear()}
                         className="h-11"
+                        disabled={isLoading}
                       />
+                      {errors.publicationYear && (
+                        <p className="text-sm text-destructive">{errors.publicationYear.message}</p>
+                      )}
                     </div>
 
-                    <div className="space-y-2 sm:col-span-2">
-                      <Label htmlFor="location">Preferred Exchange Location</Label>
+                    <div className="space-y-2">
+                      <Label htmlFor="pointValue">Point Value</Label>
+                      <div className="flex items-center gap-3">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          onClick={() => setValue("pointValue", Math.max(1, pointValue - 10))}
+                          disabled={pointValue <= 1 || isLoading}
+                        >
+                          -
+                        </Button>
+                        <Input
+                          id="pointValue"
+                          type="number"
+                          min="1"
+                          max="1000"
+                          {...register("pointValue", { valueAsNumber: true })}
+                          className="h-11 text-center"
+                          disabled={isLoading}
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          onClick={() => setValue("pointValue", Math.min(1000, pointValue + 10))}
+                          disabled={pointValue >= 1000 || isLoading}
+                        >
+                          +
+                        </Button>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        This determines how many points others need to exchange for this book
+                      </p>
+                      {errors.pointValue && (
+                        <p className="text-sm text-destructive">{errors.pointValue.message}</p>
+                      )}
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="language">Language</Label>
+                      <Input
+                        id="language"
+                        type="text"
+                        placeholder="e.g., English"
+                        {...register("language")}
+                        className="h-11"
+                        disabled={isLoading}
+                      />
+                      {errors.language && (
+                        <p className="text-sm text-destructive">{errors.language.message}</p>
+                      )}
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="location">Preferred Exchange Location (Optional)</Label>
                       <Input
                         id="location"
                         type="text"
                         placeholder="e.g., Central Park, Coffee Shop on Main St"
-                        value={location}
-                        onChange={(e) => setLocation(e.target.value)}
+                        {...register("location")}
                         className="h-11"
+                        disabled={isLoading}
                       />
+                      {errors.location && (
+                        <p className="text-sm text-destructive">{errors.location.message}</p>
+                      )}
                     </div>
 
                     <div className="space-y-2 sm:col-span-2">
-                      <Label htmlFor="description">Description</Label>
+                      <Label htmlFor="description">Description (Optional)</Label>
                       <Textarea
                         id="description"
                         placeholder="Tell others about this book and why you love it..."
-                        value={description}
-                        onChange={(e) => setDescription(e.target.value)}
+                        {...register("description")}
                         rows={4}
                         className="resize-none"
+                        disabled={isLoading}
                       />
+                      {errors.description && (
+                        <p className="text-sm text-destructive">{errors.description.message}</p>
+                      )}
                     </div>
 
                     <div className="space-y-2 sm:col-span-2">
@@ -229,20 +423,45 @@ export default function AddBookPage() {
                         <Upload className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
                         <p className="text-sm text-muted-foreground">Click to upload or drag and drop</p>
                         <p className="text-xs text-muted-foreground mt-1">PNG, JPG up to 5MB</p>
+                        <Input
+                          id="cover"
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            // Handle file upload here
+                            console.log("File selected:", e.target.files?.[0])
+                          }}
+                          disabled={isLoading}
+                        />
                       </div>
                     </div>
                   </div>
 
                   <div className="flex flex-col sm:flex-row gap-3 pt-4">
-                    <Button type="submit" className="flex-1 h-12 bg-primary hover:bg-primary/90 gap-2">
-                      <QrCode className="h-4 w-4" />
-                      Add Book & Generate QR Code
+                    <Button 
+                      type="submit" 
+                      className="flex-1 h-12 bg-primary hover:bg-primary/90 gap-2"
+                      disabled={isLoading}
+                    >
+                      {isLoading ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Adding Book...
+                        </>
+                      ) : (
+                        <>
+                          <QrCode className="h-4 w-4" />
+                          Add Book & Generate QR Code
+                        </>
+                      )}
                     </Button>
                     <Button
                       type="button"
                       variant="outline"
                       onClick={handleReset}
                       className="sm:w-32 h-12 bg-transparent"
+                      disabled={isLoading}
                     >
                       Reset
                     </Button>

@@ -1,6 +1,5 @@
 "use client"
-
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
 import { BookCard } from "@/components/book-card"
@@ -8,124 +7,65 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Search } from "lucide-react"
+import { Search, Loader2 } from "lucide-react"
 import type { Book } from "@/types/book"
-
-// Mock data
-const mockBooks: Book[] = [
-  {
-    id: "1",
-    title: "To Kill a Mockingbird",
-    author: "Harper Lee",
-    genre: "Fiction",
-    condition: "Good",
-    description: "A classic of modern American literature",
-    ownerName: "Sarah Johnson",
-    ownerId: "user1",
-    status: "available",
-    publicationYear: 1960,
-    createdAt: new Date(),
-  },
-  {
-    id: "2",
-    title: "1984",
-    author: "George Orwell",
-    genre: "Dystopian",
-    condition: "Excellent",
-    description: "A dystopian social science fiction novel",
-    ownerName: "Michael Chen",
-    ownerId: "user2",
-    status: "available",
-    publicationYear: 1949,
-    createdAt: new Date(),
-  },
-  {
-    id: "3",
-    title: "Pride and Prejudice",
-    author: "Jane Austen",
-    genre: "Romance",
-    condition: "Fair",
-    description: "A romantic novel of manners",
-    ownerName: "Emily Watson",
-    ownerId: "user3",
-    status: "available",
-    publicationYear: 1813,
-    createdAt: new Date(),
-  },
-  {
-    id: "4",
-    title: "The Great Gatsby",
-    author: "F. Scott Fitzgerald",
-    genre: "Fiction",
-    condition: "Good",
-    description: "A novel about the American Dream",
-    ownerName: "David Martinez",
-    ownerId: "user4",
-    status: "available",
-    publicationYear: 1925,
-    createdAt: new Date(),
-  },
-  {
-    id: "5",
-    title: "The Catcher in the Rye",
-    author: "J.D. Salinger",
-    genre: "Fiction",
-    condition: "Good",
-    description: "A story about teenage rebellion",
-    ownerName: "Lisa Anderson",
-    ownerId: "user5",
-    status: "available",
-    publicationYear: 1951,
-    createdAt: new Date(),
-  },
-  {
-    id: "6",
-    title: "Harry Potter and the Philosopher's Stone",
-    author: "J.K. Rowling",
-    genre: "Fantasy",
-    condition: "Excellent",
-    description: "The first book in the Harry Potter series",
-    ownerName: "James Wilson",
-    ownerId: "user6",
-    status: "available",
-    publicationYear: 1997,
-    createdAt: new Date(),
-  },
-  {
-    id: "7",
-    title: "The Hobbit",
-    author: "J.R.R. Tolkien",
-    genre: "Fantasy",
-    condition: "Good",
-    description: "A fantasy adventure novel",
-    ownerName: "Robert Brown",
-    ownerId: "user7",
-    status: "available",
-    publicationYear: 1937,
-    createdAt: new Date(),
-  },
-  {
-    id: "8",
-    title: "Brave New World",
-    author: "Aldous Huxley",
-    genre: "Dystopian",
-    condition: "Fair",
-    description: "A dystopian novel set in a futuristic society",
-    ownerName: "Jennifer Lee",
-    ownerId: "user8",
-    status: "available",
-    publicationYear: 1932,
-    createdAt: new Date(),
-  },
-]
+import { supabase } from "@/lib/supabase/client"
 
 export default function BrowsePage() {
+  const [books, setBooks] = useState<Book[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedGenres, setSelectedGenres] = useState<string[]>([])
   const [selectedConditions, setSelectedConditions] = useState<string[]>([])
 
-  const genres = ["Fiction", "Dystopian", "Romance", "Fantasy"]
-  const conditions = ["Excellent", "Good", "Fair"]
+  const genres = ["Fiction", "Dystopian", "Romance", "Fantasy", "Mystery", "Science Fiction", "Non-Fiction"]
+  const conditions = ["Excellent", "Good", "Fair", "Mint", "Poor"]
+
+  useEffect(() => {
+    fetchBooks()
+  }, [])
+
+  const fetchBooks = async () => {
+    setIsLoading(true)
+    setError(null)
+    try {
+      const { data, error: fetchError } = await supabase
+        .from("books")
+        .select(`
+          *,
+          profiles (
+            name
+          )
+        `)
+        .eq("available", true)
+        .order("created_at", { ascending: false })
+
+      if (fetchError) throw fetchError
+
+      const mappedBooks: Book[] = (data || []).map((book: any) => ({
+        id: book.id,
+        title: book.title,
+        author: book.author,
+        genre: book.genre,
+        condition: book.condition,
+        description: book.description,
+        coverImage: book.cover_image,
+        ownerName: book.profiles?.name || "Local Collector",
+        ownerId: book.owner_id,
+        status: book.available ? "available" : "exchanged",
+        publicationYear: book.publication_year,
+        createdAt: new Date(book.created_at),
+      }))
+
+      setBooks(mappedBooks)
+    } catch (err: any) {
+      console.error("Error fetching books:", err)
+      setError(err.message || "Failed to retrieve archives")
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   const toggleGenre = (genre: string) => {
     setSelectedGenres((prev) => (prev.includes(genre) ? prev.filter((g) => g !== genre) : [...prev, genre]))
@@ -137,7 +77,7 @@ export default function BrowsePage() {
     )
   }
 
-  const filteredBooks = mockBooks.filter((book) => {
+  const filteredBooks = books.filter((book) => {
     const matchesSearch =
       book.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       book.author.toLowerCase().includes(searchQuery.toLowerCase())
