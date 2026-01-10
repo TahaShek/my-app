@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { BookOpen } from "lucide-react"
 import { signUp } from "@/lib/auth"
+import { supabase } from "@/lib/supabase/client"
 
 export default function SignupPage() {
   const router = useRouter()
@@ -30,9 +31,18 @@ export default function SignupPage() {
     setIsLoading(true)
     setError("")
 
-    const result = await signUp(email, password, name)
+    const result = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          name,
+        },
+        redirectTo: "/dashboard",
+      },
+    })
 
-    if (result.success) {
+    if (result.data.user) {
       router.push("/dashboard")
     } else {
       setError(result.error || "Signup failed. Please try again.")

@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { Provider, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { BookOpen } from "lucide-react"
 import { signIn } from "@/lib/auth"
+import { createClient } from "@/lib/supabase/client"
 
 export default function LoginForm() {
   const router = useRouter()
@@ -19,6 +20,16 @@ export default function LoginForm() {
   const [password, setPassword] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState("")
+
+  const handldeOAuth = async () => {
+    const supabase = await createClient();
+    await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback`,
+      },
+    })
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -85,6 +96,16 @@ export default function LoginForm() {
             {isLoading ? "Signing in..." : "Sign In"}
           </Button>
         </form>
+        <br />
+        <Button
+          type="button"
+          onClick={handldeOAuth}
+          className="w-full h-11 bg-primary hover:bg-primary/90"
+          disabled={isLoading}
+        >
+
+          {isLoading ? "Signing in with Google..." : "Sign In with Google"}
+        </Button>
       </CardContent>
       <CardFooter className="flex flex-col space-y-4">
         <div className="text-center text-sm text-muted-foreground">

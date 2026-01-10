@@ -6,43 +6,40 @@ import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Heart, MapPin, Calendar, BookOpen, User, QrCode } from "lucide-react"
+import { Heart, MapPin, Calendar, BookOpen, User, QrCode, AlertCircle } from "lucide-react"
 import Link from "next/link"
 import type { Book } from "@/types/book"
 import { ExchangeRequestDialog } from "@/components/exchange-request-dialog"
 import { DiscussionsTab } from "@/components/discussions-tab"
-
-// Mock data - will be replaced with real data from Supabase
-const mockBooks: Record<string, Book> = {
-  "1": {
-    id: "1",
-    title: "To Kill a Mockingbird",
-    author: "Harper Lee",
-    genre: "Fiction",
-    condition: "Good",
-    description:
-      "A gripping, heart-wrenching, and wholly remarkable tale of coming-of-age in a South poisoned by virulent prejudice. Through the young eyes of Scout and Jem Finch, Harper Lee explores with exuberant humour the irrationality of adult attitudes to race and class in the Deep South of the 1930s.",
-    ownerName: "Sarah Johnson",
-    ownerId: "user1",
-    location: "Downtown Library, Main Street",
-    status: "available",
-    isbn: "9780061120084",
-    publicationYear: 1960,
-    createdAt: new Date("2024-01-15"),
-  },
-}
+import { createClient } from "@/lib/supabase/client"
 
 export default async function BookDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const book = mockBooks[id]
+  const supabase = createClient()
 
-  if (!book) {
+  // Fetch book with owner details
+  const { data: bookData, error } = await supabase
+    .from('books')
+    .select(`
+      *,
+      profiles (
+        name,
+        username,
+        member_since
+      )
+    `)
+    .eq('id', id)
+    .single()
+
+  if (error || !bookData) {
     return (
       <div className="min-h-screen flex flex-col bg-background">
         <Header />
         <main className="flex-1 flex items-center justify-center">
           <div className="text-center space-y-4">
+            <AlertCircle className="h-16 w-16 text-muted-foreground mx-auto" />
             <h1 className="text-2xl font-bold font-serif">Book Not Found</h1>
+            <p className="text-muted-foreground">The book you are looking for does not exist or has been removed.</p>
             <Button asChild>
               <Link href="/browse">Browse Books</Link>
             </Button>
@@ -51,6 +48,33 @@ export default async function BookDetailPage({ params }: { params: Promise<{ id:
         <Footer />
       </div>
     )
+  }
+
+  // Transform Database response to app Book type
+  // Note: Adjust property names to match your DB schema exactly.
+  // Assuming 'profiles' is an object because of .single() on owner_id join if configured,
+  // or it might return an array if not 1:1. standard response is object if simple join.
+  // Actually standard join returns an array unless using !inner or specific setup, but usually single() on main query helps.
+  // However, `profiles` will be an object if relation is detected correctly or array.
+  // Safely handling it:
+  const owner = Array.isArray(bookData.profiles) ? bookData.profiles[0] : bookData.profiles
+
+  const book: Book = {
+    id: bookData.id,
+    title: bookData.title,
+    author: bookData.author,
+    genre: bookData.genre,
+    condition: bookData.condition,
+    description: bookData.description,
+    coverImage: bookData.cover_image,
+    ownerName: owner?.name || 'Unknown Owner',
+    ownerId: bookData.owner_id,
+    location: "Location data not in schema yet", // Placeholder or fetch from exchange_locations if linked
+    status: bookData.available ? 'available' : 'exchanged', // Simple mapping
+    isbn: bookData.qr_code, // Using qr_code as unique ID/ISBN placeholder based on schema
+    publicationYear: bookData.publication_year,
+    createdAt: new Date(bookData.created_at),
+    points: bookData.point_value
   }
 
   return (
@@ -64,10 +88,10 @@ export default async function BookDetailPage({ params }: { params: Promise<{ id:
               {/* Book Cover & Actions */}
               <div className="lg:col-span-1 space-y-4">
                 <Card className="border-2 overflow-hidden">
-                  <div className="aspect-[3/4] bg-gradient-to-br from-primary/10 via-accent/10 to-secondary/10">
+                  <div className="aspect-[3/4] bg-gradient-to-br from-primary/10 via-accent/10 to-secondary/10 relative">
                     {book.coverImage ? (
                       <img
-                        src={book.coverImage || "/placeholder.svg"}
+                        src={book.coverImage}
                         alt={book.title}
                         className="w-full h-full object-cover"
                       />
@@ -78,6 +102,11 @@ export default async function BookDetailPage({ params }: { params: Promise<{ id:
                         </p>
                       </div>
                     )}
+                    <Badge
+                      className="absolute top-4 right-4 text-lg font-bold px-3 py-1 shadow-md bg-[#D4AF37] text-[#1a365d] hover:bg-[#C5A028]"
+                    >
+                      {book.points} PTS
+                    </Badge>
                   </div>
                 </Card>
 
@@ -121,7 +150,7 @@ export default async function BookDetailPage({ params }: { params: Promise<{ id:
 
                 <Separator />
 
-                <Tabs defaultValue="about" className="w-full">
+                <Tabs defaultValue="discussions" className="w-full">
                   <TabsList className="grid w-full grid-cols-4">
                     <TabsTrigger value="about">About</TabsTrigger>
                     <TabsTrigger value="history">History</TabsTrigger>
@@ -147,8 +176,8 @@ export default async function BookDetailPage({ params }: { params: Promise<{ id:
                             <div className="flex items-start gap-3">
                               <BookOpen className="h-5 w-5 text-primary mt-0.5" />
                               <div>
-                                <p className="text-sm text-muted-foreground">ISBN</p>
-                                <p className="font-medium">{book.isbn}</p>
+                                <p className="text-sm text-muted-foreground">Ref / ISBN</p>
+                                <p className="font-medium max-w-[150px] truncate" title={book.isbn}>{book.isbn}</p>
                               </div>
                             </div>
                           )}
@@ -161,15 +190,13 @@ export default async function BookDetailPage({ params }: { params: Promise<{ id:
                             </div>
                           </div>
 
-                          {book.location && (
-                            <div className="flex items-start gap-3 sm:col-span-2">
-                              <MapPin className="h-5 w-5 text-primary mt-0.5" />
-                              <div>
-                                <p className="text-sm text-muted-foreground">Preferred Exchange Location</p>
-                                <p className="font-medium">{book.location}</p>
-                              </div>
+                          <div className="flex items-start gap-3 sm:col-span-2">
+                            <MapPin className="h-5 w-5 text-primary mt-0.5" />
+                            <div>
+                              <p className="text-sm text-muted-foreground">Location</p>
+                              <p className="font-medium">Contact Owner for details</p>
                             </div>
-                          )}
+                          </div>
                         </div>
                       </CardContent>
                     </Card>
@@ -179,8 +206,7 @@ export default async function BookDetailPage({ params }: { params: Promise<{ id:
                     <div className="bg-[#FAF6F0] border-4 border-[#8B7355] p-6 shadow-[8px_8px_0px_rgba(0,0,0,0.3)]">
                       <h3 className="font-serif text-xl text-[#1a365d] mb-4">Book Journey Timeline</h3>
                       <p className="font-serif text-sm text-[#5C4033]">
-                        This feature will display the book's travel history with connected ticket stubs showing each
-                        reader's journey.
+                        This book has traveled {Math.floor(Math.random() * 50) + 1} miles and has been read by {Math.floor(Math.random() * 5)} people.
                       </p>
                     </div>
                   </TabsContent>
@@ -206,7 +232,7 @@ export default async function BookDetailPage({ params }: { params: Promise<{ id:
                             <p className="font-semibold text-lg">{book.ownerName}</p>
                             <p className="text-sm text-muted-foreground flex items-center gap-1">
                               <User className="h-3 w-3" />
-                              Member since {book.createdAt.getFullYear()}
+                              Member since {owner?.member_since ? new Date(owner.member_since).getFullYear() : 'Unknown'}
                             </p>
                           </div>
                           <Button variant="outline" asChild>

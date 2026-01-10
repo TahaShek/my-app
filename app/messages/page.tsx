@@ -1,226 +1,323 @@
 "use client"
 
-import { useState } from "react"
+import { cn } from "@/lib/utils"
+import { ChatMessageItem } from "@/components/chat-message"
+import { useChatScroll } from "@/hooks/use-chat-scroll"
+import {
+  type ChatMessage,
+  useRealtimeChat,
+} from "@/hooks/use-realtime-chat"
 import { Button } from "@/components/ui/button"
-import { Send, Mail } from "lucide-react"
-
-interface Message {
-  id: string
-  from: string
-  content: string
-  timestamp: Date
-  sent: boolean
-}
-
-interface Conversation {
-  id: string
-  user: string
-  lastMessage: string
-  timestamp: Date
-  unread: boolean
-}
+import { Input } from "@/components/ui/input"
+import { Send, User as UserIcon, Users, Search, Hash, Loader2, Mail } from "lucide-react"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { getProfiles } from "@/lib/chat-db"
+import type { Profile } from "@/lib/types/database"
+import { supabase } from "@/lib/supabase/client"
+import { handleForegroundMessage } from "@/lib/push"
+import { messaging } from "@/lib/firebase"
 
 export default function MessagesPage() {
-  const [selectedConvo, setSelectedConvo] = useState<string>("user1")
-  const [newMessage, setNewMessage] = useState("")
+  const [profiles, setProfiles] = useState<Profile[]>([])
+  const [selectedProfile, setSelectedProfile] = useState<Profile | null>(null)
+  const [searchTerm, setSearchTerm] = useState('')
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true)
+  const [currentUser, setCurrentUser] = useState<any>(null)
 
-  const conversations: Conversation[] = [
-    {
-      id: "user1",
-      user: "@bookworm23",
-      lastMessage: "Thanks for the book!",
-      timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000),
-      unread: true,
-    },
-    {
-      id: "user2",
-      user: "@literature_lover",
-      lastMessage: "Book arrived safely!",
-      timestamp: new Date(Date.now() - 24 * 60 * 60 * 1000),
-      unread: false,
-    },
-    {
-      id: "user3",
-      user: "@reading_enthusiast",
-      lastMessage: "When can we meet?",
-      timestamp: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
-      unread: false,
-    },
-  ]
+  useEffect(() => {
+    const fetchInitialData = async () => {
+      const allProfiles = await getProfiles()
+      setProfiles(allProfiles)
 
-  const messages: Message[] = [
-    {
-      id: "1",
-      from: "you",
-      content:
-        "Hi! I'd love to exchange books with you. The book looks amazing and I've been wanting to read it for a while.",
-      timestamp: new Date(Date.now() - 3 * 60 * 60 * 1000),
-      sent: true,
-    },
-    {
-      id: "2",
-      from: selectedConvo,
-      content: "Would love to exchange. When works for you? I'm free this weekend.",
-      timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000),
-      sent: false,
-    },
-    {
-      id: "3",
-      from: "you",
-      content: "Saturday afternoon at Central Library? Around 2pm?",
-      timestamp: new Date(Date.now() - 1 * 60 * 60 * 1000),
-      sent: true,
-    },
-  ]
-
-  const handleSend = () => {
-    if (newMessage.trim()) {
-      console.log("[v0] Sending postcard:", newMessage)
-      setNewMessage("")
+      const { data: { user } } = await supabase.auth.getUser()
+      setCurrentUser(user)
     }
-  }
+    fetchInitialData()
+  }, [])
+
+  useEffect(() => {
+    if (!messaging) return
+    const unsubscribe = handleForegroundMessage(messaging)
+    return () => unsubscribe()
+  }, [])
+
+  const roomName = useMemo(() => {
+    if (!selectedProfile || !currentUser) return 'general'
+    return `direct:${[currentUser.id, selectedProfile.id].sort().join('-')}`
+  }, [selectedProfile, currentUser])
+
+  const {
+    messages: realtimeMessages,
+    sendMessage,
+    isConnected,
+    isLoading,
+    error,
+    user,
+  } = useRealtimeChat({
+    roomName,
+  })
+
+  const { containerRef, scrollToBottom } = useChatScroll()
+  const [newMessage, setNewMessage] = useState('')
+
+  const sortedMessages = useMemo(() => {
+    return [...realtimeMessages].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+  }, [realtimeMessages])
+
+  useEffect(() => {
+    scrollToBottom()
+  }, [sortedMessages, scrollToBottom])
+
+  const handleSendMessage = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault()
+      if (!newMessage.trim() || !isConnected) return
+      sendMessage(newMessage, selectedProfile?.id)
+      setNewMessage('')
+    },
+    [newMessage, isConnected, sendMessage, selectedProfile]
+  )
+
+  const filteredProfiles = profiles.filter(p =>
+    p.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    p.email?.toLowerCase().includes(searchTerm.toLowerCase())
+  )
 
   return (
-    <div className="min-h-screen bg-[#F5EFE7] py-8">
-      <div className="container mx-auto px-4">
-        <div className="mb-8 text-center">
-          <div className="inline-block bg-[#1a365d] text-[#D4AF37] px-6 py-3 border-4 border-[#D4AF37]">
-            <Mail className="inline-block w-6 h-6 mr-2" />
-            <h1 className="inline-block font-serif text-2xl">CORRESPONDENCES</h1>
+    <div className="flex flex-col h-screen bg-[#F5EFE7]">
+      <div className="bg-[#1a365d] text-[#D4AF37] px-6 py-3 shadow-md border-b-4 border-[#D4AF37] z-20 sticky top-0">
+        <div className="flex items-center gap-3">
+          <Mail className="w-6 h-6" />
+          <h1 className="font-serif text-2xl tracking-wide">CORRESPONDENCES</h1>
+        </div>
+      </div>
+
+      <div className="flex flex-1 overflow-hidden">
+        {/* Sidebar */}
+        <div className={cn(
+          "flex-col border-r border-[#8B7355] bg-[#FAF6F0] transition-all duration-300 md:flex z-10",
+          isSidebarOpen ? "w-80 absolute md:relative h-full shadow-xl" : "hidden w-0"
+        )}>
+          <div className="p-4 border-b border-[#8B7355] space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="font-serif font-bold text-lg text-[#1a365d] flex items-center gap-2">
+                <Users className="size-5" />
+                POSTCARD INBOX
+              </h2>
+              <Button size="icon" variant="ghost" className="md:hidden" onClick={() => setIsSidebarOpen(false)}>
+                X
+              </Button>
+            </div>
+            <div className="relative group">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-[#8B7355]" />
+              <Input
+                placeholder="Search correspondents..."
+                className="pl-9 bg-white border-[#8B7355] rounded-none focus:ring-[#D4AF37] font-serif placeholder:font-sans"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
           </div>
-          <p className="mt-2 font-serif text-[#5C4033]">Postcard Exchange Bureau</p>
+
+          <div className="flex-1 overflow-y-auto p-2 space-y-2">
+            <button
+              onClick={() => { setSelectedProfile(null); if (window.innerWidth < 768) setIsSidebarOpen(false); }}
+              className={cn(
+                "w-full flex items-center gap-3 p-3 border-2 transition-all hover:scale-105 text-left group",
+                !selectedProfile
+                  ? "bg-[#FFF8DC] border-[#D4AF37] shadow-[4px_4px_0px_rgba(212,175,55,0.3)]"
+                  : "bg-white border-[#8B7355] hover:border-[#D4AF37]"
+              )}
+            >
+              <div className={cn(
+                "size-10 flex items-center justify-center border-2 transition-colors",
+                !selectedProfile
+                  ? "bg-[#1a365d] border-[#1a365d] text-[#D4AF37]"
+                  : "bg-[#FAF6F0] border-[#8B7355] text-[#8B7355]"
+              )}>
+                <Hash className="size-5" />
+              </div>
+              <div className="flex-1 truncate">
+                <div className="font-serif font-bold text-[#1a365d]">General Bureau</div>
+                <div className="text-xs font-mono text-[#8B7355]">Public Board</div>
+              </div>
+            </button>
+
+            <div className="px-3 py-2 text-[10px] font-bold text-[#8B7355] uppercase tracking-widest mt-4 font-mono border-b border-dashed border-[#8B7355] mb-2">
+              Direct Correspondences
+            </div>
+
+            {filteredProfiles.map((profile) => (
+              <button
+                key={profile.id}
+                onClick={() => { setSelectedProfile(profile); if (window.innerWidth < 768) setIsSidebarOpen(false); }}
+                className={cn(
+                  "w-full flex items-center gap-3 p-3 border-2 transition-all hover:scale-105 text-left group",
+                  selectedProfile?.id === profile.id
+                    ? "bg-[#FFF8DC] border-[#D4AF37] shadow-[4px_4px_0px_rgba(212,175,55,0.3)]"
+                    : "bg-white border-[#8B7355] hover:border-[#D4AF37]"
+                )}
+              >
+                <div className={cn(
+                  "size-10 flex items-center justify-center border-2 transition-colors overflow-hidden",
+                  selectedProfile?.id === profile.id
+                    ? "border-[#1a365d]"
+                    : "border-[#8B7355]"
+                )}>
+                  {profile.avatar_url ? (
+                    <img src={profile.avatar_url} alt="" className="size-full object-cover" />
+                  ) : (
+                    <UserIcon className="size-5 text-[#8B7355]" />
+                  )}
+                </div>
+                <div className="flex-1 truncate">
+                  <div className="font-serif font-bold text-[#1a365d] truncate">
+                    {profile.name || profile.email?.split('@')[0] || 'Unknown User'}
+                  </div>
+                  <div className="text-xs font-mono text-[#8B7355] truncate">{profile.email}</div>
+                </div>
+              </button>
+            ))}
+          </div>
         </div>
 
-        <div className="grid md:grid-cols-[300px_1fr] gap-6">
-          {/* Conversation List */}
-          <div className="bg-[#FAF6F0] border-4 border-[#8B7355] p-4 shadow-[8px_8px_0px_rgba(0,0,0,0.3)]">
-            <h2 className="font-serif text-lg mb-4 text-[#1a365d] border-b-2 border-[#D4AF37] pb-2">POSTCARD INBOX</h2>
-            <div className="space-y-3">
-              {conversations.map((convo) => (
-                <button
-                  key={convo.id}
-                  onClick={() => setSelectedConvo(convo.id)}
-                  className={`w-full text-left p-3 border-2 transition-all hover:scale-105 ${
-                    selectedConvo === convo.id
-                      ? "bg-[#FFF8DC] border-[#D4AF37] shadow-[4px_4px_0px_rgba(212,175,55,0.3)]"
-                      : "bg-white border-[#8B7355] hover:border-[#D4AF37]"
-                  }`}
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="font-serif font-bold text-[#1a365d]">{convo.user}</div>
-                      <div className="text-sm font-serif text-[#5C4033] truncate">{convo.lastMessage}</div>
-                    </div>
-                    {convo.unread && <div className="w-3 h-3 bg-[#DC143C] rounded-full ml-2 mt-1" />}
-                  </div>
-                  <div className="text-xs font-mono text-[#8B7355] mt-1">
-                    {convo.timestamp.toLocaleString("en-US", {
-                      hour: "numeric",
-                      minute: "2-digit",
-                      day: "numeric",
-                      month: "short",
-                    })}
-                  </div>
-                </button>
-              ))}
+        {/* Main Chat Area */}
+        <div className="flex-1 flex flex-col h-full relative bg-[#F5EFE7] overflow-hidden">
+          {/* Header */}
+          <div className="h-16 border-b-2 border-[#8B7355] flex items-center px-6 gap-4 bg-[#FAF6F0] shadow-sm flex-shrink-0">
+            <button
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              className="p-2 hover:bg-[#E8DFC5] rounded-none border border-[#8B7355] text-[#1a365d] md:hidden"
+            >
+              <Users className="size-5" />
+            </button>
+            <div className="flex items-center gap-3">
+              <div className="size-10 border-2 border-[#1a365d] flex items-center justify-center bg-white text-[#1a365d]">
+                {selectedProfile ? (
+                  selectedProfile.avatar_url ? (
+                    <img src={selectedProfile.avatar_url} alt="" className="size-full object-cover" />
+                  ) : <UserIcon className="size-5" />
+                ) : <Hash className="size-5" />}
+              </div>
+              <div>
+                <h3 className="font-serif font-bold text-lg text-[#1a365d] leading-none">
+                  {selectedProfile ? (selectedProfile.name || selectedProfile.email?.split('@')[0]) : 'General Bureau'}
+                </h3>
+                <div className="flex items-center gap-1.5 mt-1">
+                  <div className={cn("size-2 rounded-full", isConnected ? "bg-green-600 animate-pulse" : "bg-gray-400")} />
+                  <span className="text-[10px] font-mono text-[#8B7355] uppercase">
+                    {isConnected ? 'Telegraph Online' : 'Connecting...'}
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* Message Thread */}
-          <div className="space-y-6">
-            <div className="space-y-4">
-              {messages.map((msg, idx) => (
+          {/* Messages */}
+          <div ref={containerRef} className="flex-1 overflow-y-auto p-4 space-y-6">
+            {isLoading && (
+              <div className="flex items-center justify-center h-full text-[#8B7355] font-serif">
+                <Loader2 className="size-6 animate-spin mr-2" />
+                Fetching correspondences...
+              </div>
+            )}
+
+            {!isLoading && sortedMessages.length === 0 && (
+              <div className="flex flex-col items-center justify-center h-full opacity-60">
+                <div className="size-20 border-4 border-[#8B7355] bg-[#FAF6F0] flex items-center justify-center mb-4 transform rotate-3 shadow-[8px_8px_0px_rgba(0,0,0,0.1)]">
+                  <Send className="size-8 text-[#8B7355]" />
+                </div>
+                <p className="font-serif text-lg text-[#5C4033]">No postcards yet</p>
+                <p className="font-mono text-xs text-[#8B7355]">Be the first to write!</p>
+              </div>
+            )}
+
+            {!isLoading && sortedMessages.map((message, index) => {
+              const prevMessage = index > 0 ? sortedMessages[index - 1] : null
+              const showHeader = !prevMessage || prevMessage.user.id !== message.user.id
+              const isOwn = message.user.id === user?.id
+
+              return (
                 <div
-                  key={msg.id}
-                  className={`${msg.sent ? "ml-auto" : "mr-auto"} max-w-md`}
-                  style={{ transform: `rotate(${msg.sent ? -2 + idx : 2 - idx}deg)` }}
+                  key={message.id}
+                  className={cn(
+                    "max-w-md w-full",
+                    isOwn ? "ml-auto" : "mr-auto"
+                  )}
+                  style={{ transform: `rotate(${isOwn ? -1 : 1}deg)` }}
                 >
-                  {/* Postcard */}
-                  <div
-                    className={`relative border-4 p-6 shadow-[8px_8px_0px_rgba(0,0,0,0.2)] ${
-                      msg.sent ? "bg-[#FFF8DC] border-[#D4AF37]" : "bg-white border-[#8B7355]"
-                    }`}
-                  >
-                    {/* Postage Stamp */}
+                  <div className={cn(
+                    "relative border-4 p-5 shadow-[8px_8px_0px_rgba(0,0,0,0.15)] transition-transform hover:scale-[1.01]",
+                    isOwn
+                      ? "bg-[#FFF8DC] border-[#D4AF37]"
+                      : "bg-white border-[#8B7355]"
+                  )}>
+                    {/* Stamp */}
                     <div
-                      className={`absolute w-12 h-12 border-2 ${
-                        msg.sent ? "border-[#DC143C]" : "border-[#1a365d]"
-                      } top-4 right-4 bg-white flex items-center justify-center transform rotate-6`}
+                      className={cn(
+                        "absolute w-10 h-10 border-2 top-3 right-3 flex items-center justify-center bg-white transform rotate-6",
+                        isOwn ? "border-[#DC143C]" : "border-[#1a365d]"
+                      )}
                     >
-                      <div className="text-xs font-serif text-center">
-                        <div className="font-bold">{msg.sent ? "SENT" : "RECD"}</div>
+                      <div className="text-[8px] font-serif font-bold text-center leading-tight">
+                        {isOwn ? "AIR\nMAIL" : "POST"}
                       </div>
                     </div>
 
-                    {/* Message Content */}
-                    <div className="pr-16">
-                      <div className="font-serif text-sm text-[#1a365d] mb-2">
-                        {msg.sent ? "To: " : "From: "}
-                        <span className="font-bold">{msg.sent ? selectedConvo : msg.from}</span>
+                    {showHeader && (
+                      <div className="mb-2 pr-12">
+                        <span className="font-serif font-bold text-[#1a365d] text-sm block">
+                          {isOwn ? "From: You" : `From: ${message.user.name}`}
+                        </span>
                       </div>
-                      <div
-                        className="font-serif text-[#5C4033] mb-4"
-                        style={{ fontFamily: "'Dancing Script', cursive" }}
-                      >
-                        {msg.content}
-                      </div>
-                      <div className="border-t-2 border-dashed border-[#8B7355] pt-2 mt-4">
-                        <div className="text-xs font-mono text-[#8B7355]">
-                          {msg.timestamp.toLocaleString("en-US", {
-                            hour: "numeric",
-                            minute: "2-digit",
-                            day: "numeric",
-                            month: "short",
-                            year: "numeric",
-                          })}
-                        </div>
-                      </div>
+                    )}
+
+                    <div className="font-serif text-[#5C4033] text-base leading-relaxed" style={{ fontFamily: "'Dancing Script', cursive" }}>
+                      {message.content}
+                    </div>
+
+                    <div className="mt-3 pt-2 border-t border-dashed border-[#8B7355]/50 flex justify-end">
+                      <span className="font-mono text-[10px] text-[#8B7355]">
+                        {new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
                     </div>
                   </div>
                 </div>
-              ))}
-            </div>
+              )
+            })}
+          </div>
 
-            {/* Compose Postcard */}
-            <div className="bg-[#FFF8DC] border-4 border-[#D4AF37] p-6 shadow-[8px_8px_0px_rgba(212,175,55,0.3)]">
-              <h3 className="font-serif text-lg text-[#1a365d] mb-4">COMPOSE POSTCARD</h3>
-
-              {/* Postage Stamp Icon */}
-              <div className="absolute w-10 h-10 border-2 border-[#DC143C] bg-white top-4 right-4 flex items-center justify-center">
-                <Mail className="w-5 h-5 text-[#DC143C]" />
-              </div>
-
-              <div className="mb-4">
-                <div className="font-serif text-sm text-[#5C4033] mb-2">
-                  Dear <span className="font-bold">@{selectedConvo}</span>,
+          {/* Input */}
+          <div className="p-4 bg-[#FAF6F0] border-t-4 border-[#D4AF37] shadow-[0_-4px_10px_rgba(0,0,0,0.05)] z-20">
+            <form
+              onSubmit={handleSendMessage}
+              className="flex items-end gap-3 max-w-4xl mx-auto w-full"
+            >
+              <div className="relative flex-1 group">
+                <div className="absolute top-0 right-0 p-2 pointer-events-none">
+                  <div className="w-8 h-8 border border-[#DC143C] opacity-20 rotate-12" />
                 </div>
-                <textarea
+                <Input
+                  className="pr-12 md:py-6 py-4 rounded-none border-2 border-[#8B7355] bg-white focus:bg-[#FFF8DC] focus:border-[#D4AF37] transition-all font-serif text-lg placeholder:font-sans placeholder:text-sm"
+                  placeholder={selectedProfile ? `Write to @${selectedProfile.name || 'User'}...` : "Write to everyone..."}
                   value={newMessage}
                   onChange={(e) => setNewMessage(e.target.value)}
-                  placeholder="Write your message here..."
-                  maxLength={140}
-                  className="w-full h-32 p-3 border-2 border-[#8B7355] bg-white font-serif text-[#5C4033] resize-none focus:border-[#D4AF37] focus:outline-none"
+                  disabled={!isConnected}
                   style={{ fontFamily: "'Dancing Script', cursive" }}
                 />
-                <div className="text-xs font-mono text-[#8B7355] mt-1">{newMessage.length}/140 characters</div>
               </div>
-
-              <div className="flex items-center justify-between border-t-2 border-dashed border-[#8B7355] pt-4">
-                <div className="font-serif text-sm text-[#5C4033]">
-                  Best regards,
-                  <br />
-                  <span className="font-bold">- @YourUsername</span>
-                </div>
-                <Button
-                  onClick={handleSend}
-                  disabled={!newMessage.trim()}
-                  className="bg-[#1a365d] text-[#D4AF37] border-2 border-[#D4AF37] hover:bg-[#2d4a7c] font-serif px-6 py-2"
-                >
-                  <Send className="w-4 h-4 mr-2" />
-                  SEND POSTCARD
-                </Button>
-              </div>
-            </div>
+              <Button
+                size="icon"
+                type="submit"
+                disabled={!newMessage.trim() || !isConnected}
+                className={cn(
+                  "h-12 w-12 rounded-none border-2 border-[#1a365d] shadow-[4px_4px_0px_rgba(26,54,93,0.3)] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_rgba(26,54,93,0.3)] transition-all",
+                  newMessage.trim() ? "bg-[#1a365d] text-[#D4AF37]" : "bg-[#8B7355] text-[#FAF6F0] border-[#8B7355] opacity-80"
+                )}
+              >
+                <Send className="size-5" />
+              </Button>
+            </form>
           </div>
         </div>
       </div>
