@@ -32,16 +32,17 @@ export default function LoginForm() {
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
+    const supabase = await createClient();
     e.preventDefault()
     setIsLoading(true)
     setError("")
 
-    const result = await signIn(email, password)
+    const result = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    })
 
-    if (result.success) {
-      const redirect = searchParams.get("redirect") || "/dashboard"
-      router.push(redirect)
-    } else {
+    if (result.error) {
       setError(result.error || "Login failed. Please try again.")
       setIsLoading(false)
     }
