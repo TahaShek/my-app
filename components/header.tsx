@@ -61,6 +61,12 @@ export function Header() {
             >
               Currency Exchange
             </Link>
+            <Link
+              href="/exchange-points"
+              className="font-mono text-[11px] tracking-wider uppercase text-[#1B3A57] hover:text-[#C1403D] transition-colors"
+            >
+              Nearby Books
+            </Link>
           </nav>
 
           <div className="flex items-center gap-3">

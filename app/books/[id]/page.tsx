@@ -11,6 +11,7 @@ import Link from "next/link"
 import type { Book } from "@/types/book"
 import { ExchangeRequestDialog } from "@/components/exchange-request-dialog"
 import { DiscussionsTab } from "@/components/discussions-tab"
+import { BookQRDialog } from "@/components/book-qr-dialog"
 import { createClient } from "@/lib/supabase/client"
 
 export default async function BookDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -116,10 +117,7 @@ export default async function BookDetailPage({ params }: { params: Promise<{ id:
                     <Heart className="h-4 w-4" />
                     Add to Wishlist
                   </Button>
-                  <Button variant="outline" className="w-full h-12 gap-2 bg-transparent">
-                    <QrCode className="h-4 w-4" />
-                    View QR Code
-                  </Button>
+                  <BookQRDialog bookId={book.id} bookTitle={book.title} />
                 </div>
               </div>
 

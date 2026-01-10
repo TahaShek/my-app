@@ -21,15 +21,15 @@ export default function LoginForm() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState("")
 
-  const handldeOAuth = async () => {
-    const supabase = await createClient();
-    await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
-      },
-    })
-  }
+  // const handldeOAuth = async () => {
+  //   const supabase = await createClient();
+  //   await supabase.auth.signInWithOAuth({
+  //     provider: 'google',
+  //     options: {
+  //       redirectTo: `${window.location.origin}/auth/callback`,
+  //     },
+  //   })
+  // }
 
   const handleSubmit = async (e: React.FormEvent) => {
     const supabase = await createClient();
@@ -43,8 +43,11 @@ export default function LoginForm() {
     })
 
     if (result.error) {
-setError(result.error.message || "Login failed. Please try again.")
+      setError(result.error.message || "Login failed. Please try again.")
       setIsLoading(false)
+    }
+    else {
+      router.push("/dashboard")
     }
   }
 
@@ -79,9 +82,9 @@ setError(result.error.message || "Login failed. Please try again.")
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label htmlFor="password">Password</Label>
-              <Link href="/forgot-password" className="text-sm text-primary hover:underline">
+              {/* <Link href="/forgot-password" className="text-sm text-primary hover:underline">
                 Forgot?
-              </Link>
+              </Link> */}
             </div>
             <Input
               id="password"
@@ -97,7 +100,7 @@ setError(result.error.message || "Login failed. Please try again.")
             {isLoading ? "Signing in..." : "Sign In"}
           </Button>
         </form>
-        <br />
+        {/* <br />
         <Button
           type="button"
           onClick={handldeOAuth}
@@ -106,7 +109,7 @@ setError(result.error.message || "Login failed. Please try again.")
         >
 
           {isLoading ? "Signing in with Google..." : "Sign In with Google"}
-        </Button>
+        </Button> */}
       </CardContent>
       <CardFooter className="flex flex-col space-y-4">
         <div className="text-center text-sm text-muted-foreground">

@@ -26,3 +26,20 @@ export function createClient() {
 
 // Export a singleton instance for convenience (compatible with old supabase1.ts usage)
 export const supabase = createClient()
+
+export async function saveLocation(createdBy: string, lat: number, lng: number, name?: string, city?: string, address?: string, description?: string) {
+  const { data, error } = await supabase
+    .from("exchange_locations")
+    .insert([{
+      created_by: createdBy,
+      latitude: lat,
+      longitude: lng,
+      name: name || null,
+      city: city || null,
+      address: address || null,
+      description: description || null
+    }]);
+
+  if (error) console.log("Error saving location:", error);
+  else console.log("Location saved:", data);
+}
