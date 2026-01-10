@@ -31,6 +31,8 @@ export interface Book {
   qrCode: string
   wishlistCount: number
   createdAt: Date
+
+  
 }
 
 export interface ExchangeRequest {

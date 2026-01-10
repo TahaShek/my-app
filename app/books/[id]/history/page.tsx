@@ -15,15 +15,14 @@ import {
   MapPin, 
   Calendar, 
   User, 
-  Clock, 
   MessageSquare, 
   Loader2,
   Plus,
   CheckCircle,
   Heart,
-  Send,
   Download,
-  Share2
+  Share2,
+  ArrowRight
 } from "lucide-react"
 import { supabase } from "@/lib/supabase/client"
 import { useParams, useRouter } from "next/navigation"
@@ -57,6 +56,39 @@ interface HistoryEntry {
   city: string
   notes: string
   exchanged_at: string
+  from_profile?: {
+    name: string
+    username: string
+    avatar?: string
+  }
+  to_profile?: {
+    name: string
+    username: string
+    avatar?: string
+  }
+}
+
+const getDisplayName = (entry: HistoryEntry, type: 'from' | 'to') => {
+  const profile = type === 'from' ? entry.from_profile : entry.to_profile
+  console.log("Asdsad")
+  if (profile) {
+    console.log(profile)
+    return profile.name || profile.username || "Anonymous Reader"
+  }
+  
+  const storedName = type === 'from' ? entry.from_username : entry.to_username
+  
+  // Check for UUID patterns
+  if (storedName && (storedName.startsWith('user_') || (storedName.includes('-') && storedName.length === 36))) {
+    return "Anonymous Reader"
+  }
+  
+  // Handle special cases
+  if (storedName === "First Listed") {
+    return "First Listed"
+  }
+  
+  return storedName || "Anonymous Reader"
 }
 
 export default function BookHistoryPage() {
@@ -102,7 +134,7 @@ export default function BookHistoryPage() {
         }
       }
 
-      // Fetch book details
+      // Fetch book details with owner profile
       const { data: bookData, error: bookError } = await supabase
         .from("books")
         .select(`
@@ -133,7 +165,73 @@ export default function BookHistoryPage() {
         .order("exchanged_at", { ascending: true })
 
       if (historyError) throw historyError
-      setHistory(historyData || [])
+
+      // Get ALL user IDs from history entries (including from_user_id and to_user_id)
+      const userIds = new Set<string>()
+      historyData?.forEach((entry: { from_user_id: string; to_user_id: string }) => {
+        if (entry.from_user_id && entry.from_user_id !== entry.to_user_id) {
+          userIds.add(entry.from_user_id)
+        }
+        if (entry.to_user_id && entry.from_user_id !== entry.to_user_id) {
+          userIds.add(entry.to_user_id)
+        }
+      })
+
+      // Also add the book owner to the list
+      if (bookData?.owner_id) {
+        userIds.add(bookData.owner_id)
+      }
+
+      // Fetch profiles for all users in history
+      let profilesMap = new Map<string, { name: string; username: string; avatar?: string }>()
+      if (userIds.size > 0) {
+        const { data: profilesData } = await supabase
+          .from("profiles")
+          .select("id, name, username")
+          .in("id", Array.from(userIds))
+        
+        if (profilesData) {
+          profilesData.forEach((profile: { id: string; name: any; username: any; avatar_url: any }) => {
+            profilesMap.set(profile.id, {
+              name: profile.name  || "Anonymous Reader",
+              username: profile.username || "",
+              avatar: profile.avatar_url
+            })
+          })
+        }
+      }
+
+      // Enhance history entries with profile data
+      const enhancedHistory = historyData?.map((entry: { from_user_id: string; to_user_id: string }) => {
+        // Get profile for from_user
+        let fromProfile = undefined
+        if (entry.from_user_id && entry.from_user_id !== entry.to_user_id) {
+          fromProfile = profilesMap.get(entry.from_user_id)
+        }
+
+        // Get profile for to_user
+        let toProfile = undefined
+        if (entry.to_user_id && entry.from_user_id !== entry.to_user_id) {
+          toProfile = profilesMap.get(entry.to_user_id)
+        }
+
+        // For self-entries (reading entries), use current user's profile
+        if (entry.from_user_id === entry.to_user_id && authUser?.id === entry.from_user_id) {
+          fromProfile = {
+            name: userProfile?.name || userProfile?.username || "Reader",
+            username: userProfile?.username || "",
+            avatar: userProfile?.avatar_url
+          }
+        }
+
+        return {
+          ...entry,
+          from_profile: fromProfile,
+          to_profile: toProfile
+        }
+      }) || []
+
+      setHistory(enhancedHistory)
 
     } catch (error) {
       console.error("Error loading book history:", error)
@@ -159,6 +257,9 @@ export default function BookHistoryPage() {
         ? `[Read for ${readingDays} days] ${notes}`.trim()
         : notes
 
+      // Get current user's profile name
+      const displayName = userProfile?.name || userProfile?.username || "Reader"
+
       // Add entry to history
       const { error } = await supabase
         .from("exchange_history")
@@ -166,7 +267,7 @@ export default function BookHistoryPage() {
           book_id: bookId,
           from_user_id: user.id,
           to_user_id: user.id, // Same user (reading entry)
-          from_username: userProfile?.username || userProfile?.name || "Reader",
+          from_username: displayName, // Store the actual name
           to_username: "Currently Reading",
           city: city,
           notes: notesWithDuration || null,
@@ -186,6 +287,7 @@ export default function BookHistoryPage() {
 
     } catch (error) {
       console.error("Error adding entry:", error)
+      alert("Failed to add entry. Please try again.")
     } finally {
       setIsSubmitting(false)
     }
@@ -219,6 +321,29 @@ export default function BookHistoryPage() {
 
     img.src = "data:image/svg+xml;base64," + btoa(svgData)
   }
+
+  // const getDisplayName = (entry: HistoryEntry, type: 'from' | 'to') => {
+  //   const profile = type === 'from' ? entry.from_profile : entry.to_profile
+    
+  //   if (profile) {
+  //     return profile.name || profile.username || "Anonymous Reader"
+  //   }
+    
+  //   // Fallback to stored username (check if it's a UUID)
+  //   const storedName = type === 'from' ? entry.from_username : entry.to_username
+    
+  //   // Check if it's a UUID (starts with 'user_' or is 36 chars with hyphens)
+  //   if (storedName && (storedName.startsWith('user_') || (storedName.includes('-') && storedName.length === 36))) {
+  //     return "Anonymous Reader"
+  //   }
+    
+  //   // Check if it's "First Listed" or other special names
+  //   if (storedName === "First Listed") {
+  //     return "First Listed"
+  //   }
+    
+  //   return storedName || "Anonymous Reader"
+  // }
 
   if (isLoading) {
     return (
@@ -258,7 +383,7 @@ export default function BookHistoryPage() {
 
   const bookHistoryUrl = `${typeof window !== "undefined" ? window.location.origin : ""}/books/${bookId}/history`
   const uniqueCities = new Set(history.map(h => h.city))
-  const totalReaders = new Set(history.map(h => h.from_username)).size
+  const totalReaders = new Set(history.map(h => h.from_profile?.name || h.from_username)).size
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
@@ -352,7 +477,7 @@ export default function BookHistoryPage() {
                         <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-bold">Curator</p>
                         <p className="flex items-center gap-2 font-serif font-medium text-[#1B3A57]">
                           <User className="h-4 w-4 text-primary/60" />
-                          {book.owner?.name || "Unknown"}
+                          {book.owner?.name || book.owner?.username || "Unknown"}
                         </p>
                       </div>
                       <div className="space-y-1">
@@ -477,64 +602,73 @@ export default function BookHistoryPage() {
 
                   {/* Timeline Entries */}
                   <div className="space-y-8">
-                    {history.map((entry, index) => (
-                      <div key={entry.id} className="relative pl-20 group">
-                        {/* Timeline Dot */}
-                        <div className="absolute left-4 top-8 w-7 h-7 rounded-full bg-white border-4 border-primary shadow-md flex items-center justify-center z-10 group-hover:scale-110 transition-transform">
-                          <div className="w-1.5 h-1.5 rounded-full bg-primary" />
-                        </div>
+                    {history.map((entry, index) => {
+                      const fromName = getDisplayName(entry, 'from')
+                      const toName = getDisplayName(entry, 'to')
+                      
+                      return (
+                        <div key={entry.id} className="relative pl-20 group">
+                          {/* Timeline Dot */}
+                          <div className="absolute left-4 top-8 w-7 h-7 rounded-full bg-white border-4 border-primary shadow-md flex items-center justify-center z-10 group-hover:scale-110 transition-transform">
+                            <div className="w-1.5 h-1.5 rounded-full bg-primary" />
+                          </div>
 
-                        <Card className="border-2 border-[#1B3A57]/10 hover:border-primary/30 shadow-md hover:shadow-xl transition-all passport-corner-brackets bg-white/50 backdrop-blur-sm">
-                          <CardHeader className="pb-3 px-6 pt-6">
-                            <div className="flex items-start justify-between gap-4">
-                              <div className="flex-1">
-                                <CardTitle className="text-xl font-serif text-[#1B3A57]">
-                                  {entry.to_username === "Currently Reading" ? (
-                                    <span className="flex items-center gap-2">
-                                      {entry.from_username} <span className="text-sm font-normal text-muted-foreground italic">shared their chapter</span>
-                                    </span>
-                                  ) : (
-                                    <span className="flex items-center gap-2">
-                                      {entry.from_username} <ArrowRight className="h-4 w-4 text-primary" /> {entry.to_username}
-                                    </span>
-                                  )}
-                                </CardTitle>
-                                <div className="flex flex-wrap items-center gap-x-6 gap-y-2 mt-4">
-                                  <span className="flex items-center gap-2 text-xs font-mono uppercase tracking-widest text-primary font-bold">
-                                    <MapPin className="h-3.5 w-3.5" />
-                                    {entry.city}
-                                  </span>
-                                  <span className="flex items-center gap-2 text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
-                                    <Calendar className="h-3.5 w-3.5" />
-                                    {new Date(entry.exchanged_at).toLocaleDateString('en-US', {
-                                      month: 'short',
-                                      day: 'numeric',
-                                      year: 'numeric'
-                                    })}
-                                  </span>
-                                </div>
-                              </div>
-                              <Badge 
-                                variant={index === history.length - 1 ? "default" : "outline"}
-                                className="shrink-0 font-mono text-[9px] uppercase tracking-widest"
-                              >
-                                {index === history.length - 1 ? "Present" : `Chapter ${index + 1}`}
-                              </Badge>
-                            </div>
-                          </CardHeader>
-                          {entry.notes && (
-                            <CardContent className="px-6 pb-6">
-                              <div className="flex items-start gap-4 bg-[#FAF6F0] rounded-xl p-5 border border-[#1B3A57]/5 shadow-inner">
-                                <MessageSquare className="h-5 w-5 text-primary/40 mt-1 flex-shrink-0" />
+                          <Card className="border-2 border-[#1B3A57]/10 hover:border-primary/30 shadow-md hover:shadow-xl transition-all passport-corner-brackets bg-white/50 backdrop-blur-sm">
+                            <CardHeader className="pb-3 px-6 pt-6">
+                              <div className="flex items-start justify-between gap-4">
                                 <div className="flex-1">
-                                  <p className="text-sm text-[#1B3A57] italic font-serif leading-relaxed line-height-relaxed">"{entry.notes}"</p>
+                                  <CardTitle className="text-xl font-serif text-[#1B3A57]">
+                                    {toName === "Currently Reading" ? (
+                                      <span className="flex items-center gap-2">
+                                        {fromName} <span className="text-sm font-normal text-muted-foreground italic">shared their chapter</span>
+                                      </span>
+                                    ) : toName === "First Listed" ? (
+                                      <span className="text-sm font-normal text-muted-foreground italic">
+                                        Journey started by {fromName}
+                                      </span>
+                                    ) : (
+                                      <span className="flex items-center gap-2">
+                                        {fromName} <ArrowRight className="h-4 w-4 text-primary" /> {toName}
+                                      </span>
+                                    )}
+                                  </CardTitle>
+                                  <div className="flex flex-wrap items-center gap-x-6 gap-y-2 mt-4">
+                                    <span className="flex items-center gap-2 text-xs font-mono uppercase tracking-widest text-primary font-bold">
+                                      <MapPin className="h-3.5 w-3.5" />
+                                      {entry.city}
+                                    </span>
+                                    <span className="flex items-center gap-2 text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
+                                      <Calendar className="h-3.5 w-3.5" />
+                                      {new Date(entry.exchanged_at).toLocaleDateString('en-US', {
+                                        month: 'short',
+                                        day: 'numeric',
+                                        year: 'numeric'
+                                      })}
+                                    </span>
+                                  </div>
                                 </div>
+                                <Badge 
+                                  variant={index === history.length - 1 ? "default" : "outline"}
+                                  className="shrink-0 font-mono text-[9px] uppercase tracking-widest"
+                                >
+                                  {index === history.length - 1 ? "Present" : `Chapter ${index + 1}`}
+                                </Badge>
                               </div>
-                            </CardContent>
-                          )}
-                        </Card>
-                      </div>
-                    ))}
+                            </CardHeader>
+                            {entry.notes && (
+                              <CardContent className="px-6 pb-6">
+                                <div className="flex items-start gap-4 bg-[#FAF6F0] rounded-xl p-5 border border-[#1B3A57]/5 shadow-inner">
+                                  <MessageSquare className="h-5 w-5 text-primary/40 mt-1 flex-shrink-0" />
+                                  <div className="flex-1">
+                                    <p className="text-sm text-[#1B3A57] italic font-serif leading-relaxed line-height-relaxed">"{entry.notes}"</p>
+                                  </div>
+                                </div>
+                              </CardContent>
+                            )}
+                          </Card>
+                        </div>
+                      )
+                    })}
                   </div>
 
                   {/* Journey Started Marker */}
@@ -546,7 +680,9 @@ export default function BookHistoryPage() {
                       <CheckCircle className="h-5 w-5 text-green-500" />
                       <div>
                         <p className="text-xs font-bold text-green-800 uppercase tracking-widest">Inception</p>
-                        <p className="text-sm font-serif italic text-green-700">The journey began. This volume was first chronicled by {history[0]?.from_username || book.owner?.username || "its original curator"}.</p>
+                        <p className="text-sm font-serif italic text-green-700">
+                          The journey began. This volume was first chronicled by {book.owner?.name || book.owner?.username || "its original curator"}.
+                        </p>
                       </div>
                     </div>
                   </div>
@@ -592,25 +728,5 @@ export default function BookHistoryPage() {
 
       <Footer />
     </div>
-  )
-}
-
-function ArrowRight(props: any) {
-  return (
-    <svg
-      {...props}
-      xmlns="http://www.w3.org/2000/svg"
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M5 12h14" />
-      <path d="m12 5 7 7-7 7" />
-    </svg>
   )
 }

@@ -8,7 +8,46 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Loader2, Plus, MapPin } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+// @/types/exchange.ts
 
+export interface Book {
+  id: string;
+  title: string;
+  author: string;
+  genre: string;
+  condition: string;
+  point_value: number;
+  cover_image?: string;
+  owner?: {
+    name: string;
+    avatar?: string;
+  };
+   exchange_point_id: string;
+    exchange_location?: {
+      id: string;
+      city: string;
+      name: string;
+      address: string;
+      latitude: number;
+      longitude: number;
+      created_at: string;
+      created_by: string;
+      description: string | null;
+    };
+}
+
+export interface ExchangePoint {
+  id: string;
+  latitude: number;
+  longitude: number;
+  name?: string;
+  description?: string;
+  address?: string;
+  city?: string;
+  created_at: string;
+  books?: Book[];
+}
 // Dynamically import map to avoid SSR issues with Leaflet
 const ExchangePointsMap = dynamic(
   () => import("@/components/exchange-points-map"),
@@ -22,39 +61,80 @@ const ExchangePointsMap = dynamic(
   }
 );
 
-interface ExchangePoint {
-  id: string;
-  latitude: number;
-  longitude: number;
-  name?: string;
-  description?: string;
-  created_at: string;
-}
-
 export default function ExchangePointsPage() {
   const [points, setPoints] = useState<ExchangePoint[]>([]);
-  const [books, setBooks] = useState<any[]>([]);
+  const [allBooks, setAllBooks] = useState<Book[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     async function fetchData() {
       try {
-        const [pointsRes, booksRes] = await Promise.all([
-          supabase
-            .from("exchange_locations")
-            .select("*")
-            .order("created_at", { ascending: false }),
-          supabase
-            .from("books")
-            .select("*, owner:profiles(name, avatar)")
-            .eq("available", true)
-        ]);
+        // Fetch exchange points
+        const { data: pointsData, error: pointsError } = await supabase
+          .from("exchange_locations")
+          .select("*")
+          .order("created_at", { ascending: false });
 
-        if (pointsRes.error) console.error("Error points:", pointsRes.error);
-        else setPoints(pointsRes.data || []);
+        if (pointsError) {
+          console.error("Error points:", pointsError);
+          return;
+        }
 
-        if (booksRes.error) console.error("Error books:", booksRes.error);
-        else setBooks(booksRes.data || []);
+        // Fetch all available books with their exchange point info
+        const { data: booksData, error: booksError } = await supabase
+          .from("books")
+          .select(`
+            *,
+            owner:profiles(name, avatar),
+            exchange_location:exchange_locations!inner(*)
+          `)
+          .eq("available", true);
+
+        if (booksError) {
+          console.error("Error books:", booksError);
+        }
+
+        // Group books by exchange point
+        const booksByPoint: Record<string, Book[]> = {};
+        const booksList: Book[] = [];
+        
+        if (booksData) {
+          booksData.forEach((book: any) => {
+            if (book.exchange_location?.id) {
+              const pointId = book.exchange_location.id;
+              if (!booksByPoint[pointId]) {
+                booksByPoint[pointId] = [];
+              }
+              
+              const bookObj: Book = {
+                id: book.id,
+                title: book.title,
+                author: book.author,
+                genre: book.genre,
+                condition: book.condition,
+                point_value: book.point_value,
+                cover_image: book.cover_image,
+                owner: {
+                  name: book.owner?.name || "Unknown",
+                  avatar: book.owner?.avatar
+                },
+                exchange_point_id: pointId // This is now required
+              };
+              
+              booksByPoint[pointId].push(bookObj);
+              booksList.push(bookObj);
+            }
+          });
+        }
+
+        // Combine points with their books
+        const pointsWithBooks = pointsData?.map((point: ExchangePoint) => ({
+          ...point,
+          books: booksByPoint[point.id] || []
+        })) || [];
+
+        setPoints(pointsWithBooks);
+        setAllBooks(booksList);
 
       } catch (err) {
         console.error(err);
@@ -65,7 +145,28 @@ export default function ExchangePointsPage() {
 
     fetchData();
   }, []);
+useEffect(() => {
+  if (points.length > 0) {
+    console.log("Points data:", points);
+    console.log("Total points:", points.length);
+    points.forEach((point, index) => {
+      console.log(`Point ${index}:`, {
+        id: point.id,
+        name: point.name,
+        latitude: point.latitude,
+        longitude: point.longitude,
+        booksCount: point.books?.length || 0
+      });
+    });
+  }
+}, [points]);
 
+useEffect(() => {
+  if (allBooks.length > 0) {
+    console.log("All books:", allBooks);
+    console.log("Total books:", allBooks.length);
+  }
+}, [allBooks]);
   return (
     <div className="min-h-screen flex flex-col bg-background">
       <Header />
@@ -86,14 +187,12 @@ export default function ExchangePointsPage() {
         </div>
 
         <div className="grid lg:grid-cols-3 gap-8">
-          {/* Map Section */}
+          {/* Map Section - Will show both points and books */}
           <div className="lg:col-span-2">
-            <div className="lg:col-span-2">
-              <ExchangePointsMap points={points} books={books} />
-            </div>
+            <ExchangePointsMap points={points} books={allBooks} />
           </div>
 
-          {/* List Section */}
+          {/* List Section - Only exchange points, no books */}
           <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2">
             <h2 className="text-xl font-semibold mb-4">Available Locations ({points.length})</h2>
 
@@ -110,9 +209,24 @@ export default function ExchangePointsPage() {
                   >
                     <div className="flex items-start justify-between">
                       <div className="space-y-1">
-                        <h3 className="font-semibold">{point.name || "Exchange Point"}</h3>
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-semibold">{point.name || "Exchange Point"}</h3>
+                          <Badge variant="outline" className="text-xs">
+                            {point.books?.length || 0} books
+                          </Badge>
+                        </div>
                         <p className="text-sm text-muted-foreground line-clamp-2">
                           {point.description || "No description provided."}
+                        </p>
+                        {point.address && (
+                          <p className="text-xs text-muted-foreground flex items-center gap-1">
+                            <MapPin className="h-3 w-3" />
+                            {point.address}
+                            {point.city && `, ${point.city}`}
+                          </p>
+                        )}
+                        <p className="text-xs text-muted-foreground mt-2">
+                          📚 {point.books?.length || 0} books available
                         </p>
                       </div>
                       <MapPin className="h-4 w-4 text-primary shrink-0 mt-1" />

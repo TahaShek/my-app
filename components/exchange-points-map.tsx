@@ -1,201 +1,232 @@
+// components/exchange-points-map.tsx
 "use client";
 
-import { MapContainer, TileLayer, Marker, Popup, Tooltip, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
-import { useEffect, useState } from "react";
-import { Loader2, BookOpen } from "lucide-react";
-import Link from "next/link";
-import { Button } from "@/components/ui/button";
+import { Book, MapPin } from "lucide-react";
 
-// Fix marker icons
+// Fix for default markers in Leaflet
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
-  iconRetinaUrl:
-    "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png",
-  iconUrl:
-    "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png",
-  shadowUrl:
-    "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
+  iconRetinaUrl: "/leaflet/images/marker-icon-2x.png",
+  iconUrl: "/leaflet/images/marker-icon.png",
+  shadowUrl: "/leaflet/images/marker-shadow.png",
 });
 
-interface Point {
+interface ExchangePoint {
   id: string;
   latitude: number;
   longitude: number;
   name?: string;
   description?: string;
-  created_by?: string;
+  address?: string;
+  city?: string;
+  created_at: string;
+  books?: Book[];
 }
 
 interface Book {
+  exchange_point_id: string;
   id: string;
   title: string;
   author: string;
+  genre: string;
+  condition: string;
+  point_value: number;
   cover_image?: string;
-  location?: string;
-  owner_id: string;
   owner?: {
     name: string;
     avatar?: string;
   };
 }
 
-// User location marker icon (blue)
-const userIcon = new L.Icon({
-  iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-blue.png",
-  shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowSize: [41, 41]
-});
-
-// Custom icon for exchange points (green)
-const exchangeIcon = new L.Icon({
-  iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png",
-  shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowSize: [41, 41]
-});
-
-
-function RecenterMap({ lat, lng }: { lat: number; lng: number }) {
-  const map = useMap();
-  useEffect(() => {
-    map.flyTo([lat, lng], 13);
-  }, [lat, lng, map]);
-  return null;
+interface ExchangePointsMapProps {
+  points: ExchangePoint[];
+  books: any[];
 }
 
-export default function ExchangePointsMap({ points, books = [] }: { points: Point[], books?: Book[] }) {
-  const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
-  const [loadingLoc, setLoadingLoc] = useState(true);
+export default function ExchangePointsMap({ points, books }: ExchangePointsMapProps) {
+  const defaultCenter: [number, number] = [31.5497, 74.3436]; // Default to Lahore coordinates
+  const defaultZoom = 12;
 
-  // Default center: User location if known, else first point, else fallback
-  const center: [number, number] = userLocation
-    ? userLocation
-    : points.length > 0
-      ? [points[0].latitude, points[0].longitude]
-      : [51.505, -0.09];
+  // Custom icons
+  const exchangePointIcon = L.divIcon({
+    html: `
+      <div class="relative">
+        <div class="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center shadow-lg border-2 border-white">
+          <svg class="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd" />
+          </svg>
+        </div>
+        <div class="absolute -top-1 -right-1 w-4 h-4 bg-blue-100 text-blue-800 text-xs rounded-full flex items-center justify-center font-bold">
+          ${books.length}
+        </div>
+      </div>
+    `,
+    className: "custom-div-icon",
+    iconSize: [32, 32],
+    iconAnchor: [16, 32],
+    popupAnchor: [0, -32],
+  });
 
-  useEffect(() => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          setUserLocation([pos.coords.latitude, pos.coords.longitude]);
-          setLoadingLoc(false);
-        },
-        (err) => {
-          console.error("Geolocation error:", err);
-          setLoadingLoc(false);
-        }
-      );
-    } else {
-      setLoadingLoc(false);
+  const bookIcon = L.divIcon({
+    html: `
+      <div class="relative">
+        <div class="w-6 h-6 bg-green-600 rounded-full flex items-center justify-center shadow-lg border-2 border-white">
+          <svg class="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+            <path d="M9 4.804A7.968 7.968 0 005.5 4c-1.255 0-2.443.29-3.5.804v10A7.969 7.969 0 015.5 14c1.669 0 3.218.51 4.5 1.385A7.962 7.962 0 0114.5 14c1.255 0 2.443.29 3.5.804v-10A7.969 7.969 0 0014.5 4c-1.255 0-2.443.29-3.5.804V12a1 1 0 11-2 0V4.804z" />
+          </svg>
+        </div>
+      </div>
+    `,
+    className: "custom-div-icon",
+    iconSize: [24, 24],
+    iconAnchor: [12, 24],
+    popupAnchor: [0, -24],
+  });
+
+  // Create a map of books by their coordinates
+  const booksByCoordinate: Record<string, Book[]> = {};
+  books.forEach(book => {
+    if (book.exchange_location) {
+      const key = `${book.exchange_location.latitude},${book.exchange_location.longitude}`;
+      if (!booksByCoordinate[key]) {
+        booksByCoordinate[key] = [];
+      }
+      booksByCoordinate[key].push(book);
     }
-  }, []);
-
-  // Filter books by owner_id matching the point's created_by
-  const getBooksAtPoint = (pointCreatorId?: string) => {
-    if (!pointCreatorId) return [];
-    return books.filter(book => book.owner_id === pointCreatorId);
-  };
+  });
 
   return (
-    <div className="h-[600px] w-full border rounded-lg overflow-hidden z-0 bg-gray-100 relative">
-      {loadingLoc && (
-        <div className="absolute top-2 right-2 z-[1000] bg-white px-3 py-1 rounded shadow text-xs flex items-center gap-2">
-          <Loader2 className="h-3 w-3 animate-spin" />
-          Locating you...
-        </div>
-      )}
-
+    <div className="h-[600px] w-full rounded-lg overflow-hidden border shadow-lg">
       <MapContainer
-        center={center}
-        zoom={13}
-        style={{ height: "100%", width: "100%" }}
+        center={defaultCenter}
+        zoom={defaultZoom}
+        className="h-full w-full"
+        scrollWheelZoom={true}
       >
         <TileLayer
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
         />
 
-        {/* Helper to fly to user location when found */}
-        {userLocation && <RecenterMap lat={userLocation[0]} lng={userLocation[1]} />}
-
-        {/* User Marker */}
-        {userLocation && (
-          <Marker position={userLocation} icon={userIcon}>
-            <Popup>You are here</Popup>
-          </Marker>
-        )}
-
-        {/* Exchange Points */}
-        {points.map((point) => {
-          const booksAtLocation = getBooksAtPoint(point.created_by);
-          const bookTitles = booksAtLocation.map(b => b.title).join(", ");
-
-          return (
-            <Marker
-              key={point.id}
-              position={[point.latitude, point.longitude]}
-              icon={exchangeIcon}
-            >
-              {booksAtLocation.length > 0 && (
-                <Tooltip direction="top" offset={[0, -20]} opacity={1}>
-                  <div className="font-semibold text-sm">
-                    {booksAtLocation.length === 1
-                      ? booksAtLocation[0].title
-                      : `${booksAtLocation.length} Books: ${bookTitles.substring(0, 30)}${bookTitles.length > 30 ? '...' : ''}`}
-                  </div>
-                </Tooltip>
-              )}
-
-              <Popup className="min-w-[300px]">
-                <div className="max-h-[300px] overflow-y-auto">
-                  <div className="mb-3 border-b pb-2">
-                    <h3 className="font-bold text-lg">{point.name || "Exchange Point"}</h3>
-                    {point.description && (
-                      <p className="text-sm text-gray-600">{point.description}</p>
-                    )}
-                  </div>
-
-                  <div className="space-y-3">
-                    <h4 className="font-semibold text-sm flex items-center gap-2">
-                      <BookOpen className="h-4 w-4" />
-                      Available Books ({booksAtLocation.length})
-                    </h4>
-
-                    {booksAtLocation.length > 0 ? (
-                      <div className="grid gap-2">
-                        {booksAtLocation.map(book => (
-                          <div key={book.id} className="flex gap-3 bg-gray-50 p-2 rounded border">
-                            {book.cover_image && (
-                              <img src={book.cover_image} alt={book.title} className="w-12 h-16 object-cover rounded" />
-                            )}
-                            <div className="flex-1 min-w-0">
-                              <p className="font-medium text-sm truncate" title={book.title}>{book.title}</p>
-                              <p className="text-xs text-gray-500 truncate">{book.author}</p>
-                              <Link href={`/books/${book.id}`} className="block mt-1">
-                                <Button size="sm" variant="secondary" className="h-6 text-xs w-full">
-                                  View
-                                </Button>
-                              </Link>
+        {/* Render exchange points */}
+        {points.map((point) => (
+          <Marker
+            key={`point-${point.id}`}
+            position={[point.latitude, point.longitude]}
+            icon={exchangePointIcon}
+          >
+            <Popup>
+              <div className="p-2 max-w-xs">
+                <h3 className="font-bold text-lg mb-1">{point.name || "Exchange Point"}</h3>
+                {point.description && (
+                  <p className="text-sm text-gray-600 mb-2">{point.description}</p>
+                )}
+                {point.address && (
+                  <p className="text-sm mb-2 flex items-center gap-1">
+                    <MapPin className="h-3 w-3" />
+                    {point.address}
+                    {point.city && `, ${point.city}`}
+                  </p>
+                )}
+                
+                {/* Show books at this location */}
+                {point.books && point.books.length > 0 && (
+                  <div className="mt-3">
+                    <h4 className="font-medium text-sm mb-2">Books Available ({point.books.length})</h4>
+                    <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                      {point.books.map((book) => (
+                        <div key={book.id} className="flex items-start gap-2 p-2 bg-gray-50 rounded">
+                          {book.cover_image ? (
+                            <img
+                              src={book.cover_image}
+                              alt={book.title}
+                              className="w-10 h-14 object-cover rounded border"
+                            />
+                          ) : (
+                            <div className="w-10 h-14 bg-gradient-to-br from-green-100 to-green-200 rounded border flex items-center justify-center">
+                              <Book className="h-5 w-5 text-green-600" />
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <h5 className="font-medium text-sm truncate">{book.title}</h5>
+                            <p className="text-xs text-gray-500 truncate">by {book.author}</p>
+                            <div className="flex items-center justify-between mt-1">
+                              <span className="text-xs px-2 py-0.5 bg-gray-200 rounded">
+                                {book.genre}
+                              </span>
+                              <span className="text-xs font-bold text-amber-600">
+                                ⚡{book.point_value}
+                              </span>
                             </div>
                           </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-sm text-gray-500 italic">No books listed by this location's owner.</p>
-                    )}
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              </Popup>
-            </Marker>
-          );
+                )}
+
+                {(!point.books || point.books.length === 0) && (
+                  <p className="text-sm text-gray-500 italic mt-2">
+                    No books available at this location yet.
+                  </p>
+                )}
+              </div>
+            </Popup>
+          </Marker>
+        ))}
+
+        {/* Optionally render individual book markers */}
+        {Object.entries(booksByCoordinate).map(([coords, booksAtLocation]) => {
+          const [lat, lng] = coords.split(",").map(Number);
+          
+          // Only show book markers if there are fewer than 5 books at this location
+          // to avoid clutter
+          if (booksAtLocation.length < 5) {
+            return booksAtLocation.map((book) => (
+              <Marker
+                key={`book-${book.id}`}
+                position={[lat, lng]}
+                icon={bookIcon}
+              >
+                <Popup>
+                  <div className="p-2 max-w-xs">
+                    <div className="flex items-start gap-2">
+                      {book.cover_image ? (
+                        <img
+                          src={book.cover_image}
+                          alt={book.title}
+                          className="w-12 h-16 object-cover rounded border"
+                        />
+                      ) : (
+                        <div className="w-12 h-16 bg-gradient-to-br from-green-100 to-green-200 rounded border flex items-center justify-center">
+                          <Book className="h-6 w-6 text-green-600" />
+                        </div>
+                      )}
+                      <div>
+                        <h4 className="font-bold text-sm">{book.title}</h4>
+                        <p className="text-xs text-gray-600">by {book.author}</p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="text-xs px-2 py-0.5 bg-gray-200 rounded">
+                            {book.genre}
+                          </span>
+                          <span className="text-xs font-bold text-amber-600">
+                            ⚡{book.point_value}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-2">
+                          Available at: {points.find(p => p.id === book.exchange_point_id)?.name || "Exchange Point"}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </Popup>
+              </Marker>
+            ));
+          }
+          return null;
         })}
       </MapContainer>
     </div>

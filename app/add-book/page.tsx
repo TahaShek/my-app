@@ -12,20 +12,20 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { BookOpen, Upload, QrCode, Loader2, MapPin, Navigation, X, Sparkles } from "lucide-react"
+import { BookOpen, Upload, QrCode, Loader2, X, Sparkles, MapPin, Plus, Coins } from "lucide-react"
 import { QRCodeGenerator } from "@/components/qr-code-generator"
 import { supabase } from "@/lib/supabase/client"
 import { useRouter } from "next/navigation"
-import dynamic from "next/dynamic";
 import { z } from 'zod'
 import { cn } from "@/lib/utils"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import dynamic from "next/dynamic"
 
-const LocationPickerModal = dynamic(
-  () => import("@/components/locationPickerModal"),
+const CreateExchangePointDialog = dynamic(
+  () => import("@/components/create-exchange-point-dialog"),
   { ssr: false }
-);
+)
 
-// Fix 1: Define the schema with proper typing
 const bookSchema = z.object({
   title: z.string().min(1, 'Title is required').max(200),
   author: z.string().min(1, 'Author is required').max(100),
@@ -40,11 +40,20 @@ const bookSchema = z.object({
     .nullable(),
   pointValue: z.coerce.number().min(1).max(1000),
   language: z.string().optional(),
-  location: z.string().min(2, 'Location is required').max(100),
+  exchangePointId: z.string().min(1, 'Please select an exchange point'),
   available: z.boolean().optional().default(true),
 })
 
 type BookFormData = z.infer<typeof bookSchema>
+
+interface ExchangePoint {
+  id: string
+  name: string
+  address: string
+  city: string
+  latitude: number
+  longitude: number
+}
 
 export default function AddBookPage() {
   const [isLoading, setIsLoading] = useState(false)
@@ -57,7 +66,11 @@ export default function AddBookPage() {
   const [imageBase64, setImageBase64] = useState<string | null>(null)
   const [isValuating, setIsValuating] = useState(false)
   const [hasAutoValuated, setHasAutoValuated] = useState(false)
-  const [showLocationPicker, setShowLocationPicker] = useState(false)
+  const [exchangePoints, setExchangePoints] = useState<ExchangePoint[]>([])
+  const [loadingPoints, setLoadingPoints] = useState(true)
+  const [showCreatePoint, setShowCreatePoint] = useState(false)
+  const [pointsAdded, setPointsAdded] = useState<number>(0)
+  const [userCurrentPoints, setUserCurrentPoints] = useState<number>(0)
   const router = useRouter()
   const { toast } = useToast()
 
@@ -80,67 +93,104 @@ export default function AddBookPage() {
   })
 
   const watchTitle = watch("title")
-  const watchAuthor = watch("author")
   const watchCondition = watch("condition")
+  const genre = watch("genre")
+  const condition = watch("condition")
+  const pointValue = watch("pointValue")
+  const exchangePointId = watch("exchangePointId")
 
-const CONDITION_RANGES: Record<BookFormData["condition"], [number, number]> = {
-  Mint: [300, 500],
-  Excellent: [220, 350],
-  Good: [150, 250],
-  Fair: [80, 160],
-  Poor: [10, 60],
-}
+  // Fetch exchange points
+  useEffect(() => {
+    const fetchExchangePoints = async () => {
+      setLoadingPoints(true)
+      const { data, error } = await supabase
+        .from("exchange_locations")
+        .select("*")
+        .order("name")
 
-const getRandomInRange = (min: number, max: number) =>
-  Math.floor(Math.random() * (max - min + 1)) + min
+      if (error) {
+        console.error("Error fetching exchange points:", error)
+      } else {
+        setExchangePoints(data || [])
+      }
+      setLoadingPoints(false)
+    }
 
-const calculateValueWithAI = async () => {
-  if (!watchTitle || !watchCondition) {
-    toast({
-      title: "Information needed",
-      description: "Please enter at least the book title and condition first.",
-      variant: "destructive"
-    })
-    return
-  }
+    fetchExchangePoints()
+  }, [])
 
-  setIsValuating(true)
-  try {
-    // Simple local calculation instead of AI
-    const range = CONDITION_RANGES[watchCondition] || [50, 100]
-    const val = getRandomInRange(range[0], range[1])
+  // Fetch user's current points
+  useEffect(() => {
+    const fetchUserPoints = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("points")
+          .eq("id", user.id)
+          .single()
+        
+        if (profile) {
+          setUserCurrentPoints(profile.points || 0)
+        }
+      }
+    }
     
-    setValue("pointValue", val)
-    return val
-  } catch (error) {
-    console.error("Valuation Error:", error)
-    return 10
-  } finally {
-    setIsValuating(false)
-    setHasAutoValuated(true)
-  }
-}
+    fetchUserPoints()
+  }, [])
 
-  // Smart Auto-Valuation Trigger
+  const CONDITION_RANGES: Record<BookFormData["condition"], [number, number]> = {
+    Mint: [300, 500],
+    Excellent: [220, 350],
+    Good: [150, 250],
+    Fair: [80, 160],
+    Poor: [10, 60],
+  }
+
+  const getRandomInRange = (min: number, max: number) =>
+    Math.floor(Math.random() * (max - min + 1)) + min
+
+  const calculateValueWithAI = async () => {
+    if (!watchTitle || !watchCondition) {
+      toast({
+        title: "Information needed",
+        description: "Please enter at least the book title and condition first.",
+        variant: "destructive"
+      })
+      return
+    }
+
+    setIsValuating(true)
+    try {
+      const range = CONDITION_RANGES[watchCondition] || [50, 100]
+      const val = getRandomInRange(range[0], range[1])
+      
+      setValue("pointValue", val)
+      return val
+    } catch (error) {
+      console.error("Valuation Error:", error)
+      return 10
+    } finally {
+      setIsValuating(false)
+      setHasAutoValuated(true)
+    }
+  }
+
   useEffect(() => {
     if (imageBase64 && watchTitle && watchCondition && !isValuating && !hasAutoValuated) {
       calculateValueWithAI()
     }
   }, [watchTitle, watchCondition, imageBase64, isValuating, hasAutoValuated])
 
-  // Helper function to convert file to base64
   const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader()
-      reader.onloadend = () => {
-        resolve(reader.result as string)
-      }
+      reader.onloadend = () => resolve(reader.result as string)
       reader.onerror = reject
       reader.readAsDataURL(file)
     })
   }
 
-  // Helper function to compress image if too large
   const compressImage = async (base64: string, maxSizeKB: number = 500): Promise<string> => {
     return new Promise((resolve, reject) => {
       const img = new Image()
@@ -149,7 +199,6 @@ const calculateValueWithAI = async () => {
         let width = img.width
         let height = img.height
 
-        // Calculate new dimensions (max 800px width)
         const maxWidth = 800
         if (width > maxWidth) {
           height = (height * maxWidth) / width
@@ -167,7 +216,6 @@ const calculateValueWithAI = async () => {
 
         ctx.drawImage(img, 0, 0, width, height)
 
-        // Try different quality settings to get under size limit
         let quality = 0.9
         let compressedBase64 = canvas.toDataURL('image/jpeg', quality)
 
@@ -187,7 +235,6 @@ const calculateValueWithAI = async () => {
     const file = e.target.files?.[0]
     if (!file) return
 
-    // Check file size (max 5MB before compression)
     if (file.size > 5 * 1024 * 1024) {
       toast({
         title: "Image too large",
@@ -199,19 +246,16 @@ const calculateValueWithAI = async () => {
 
     try {
       const base64 = await fileToBase64(file)
-      
-      // Compress image to reduce database size
-      const compressedBase64 = await compressImage(base64, 500) // Max 500KB
+      const compressedBase64 = await compressImage(base64, 500)
       
       setImagePreview(compressedBase64)
       setImageBase64(compressedBase64)
       
       toast({
         title: "Image uploaded",
-        description: "Cover image ready. Running AI valuation...",
+        description: "Cover image ready.",
       })
 
-      // Automate valuation check
       if (watchTitle && watchCondition) {
         calculateValueWithAI()
       }
@@ -232,31 +276,81 @@ const calculateValueWithAI = async () => {
     if (input) input.value = ''
   }
 
+  // Function to add points to user's profile - FIXED VERSION
+  const addPointsToProfile = async (userId: string, pointsToAdd: number, bookTitle: string) => {
+    try {
+      // First, get current points
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("points")
+        .eq("id", userId)
+        .single()
+
+      const currentPoints = profile?.points || 0
+      const newPoints = currentPoints + pointsToAdd
+
+      // Update points in profile
+      const { error: updateError } = await supabase
+        .from("profiles")
+        .update({ 
+          points: newPoints,
+          updated_at: new Date().toISOString()
+        })
+        .eq("id", userId)
+
+      if (updateError) {
+        console.error("Error updating points:", updateError)
+        return false
+      }
+
+      // Create a points history entry
+      const { error: historyError } = await supabase
+        .from("points_history")
+        .insert({
+          user_id: userId,
+          points_change: pointsToAdd,
+          current_total: newPoints,
+          reason: `Added book to exchange point`,
+          book_title: bookTitle, // Use the passed bookTitle parameter
+          created_at: new Date().toISOString()
+        })
+
+      if (historyError) {
+        console.error("Error creating points history:", historyError)
+      }
+
+      setPointsAdded(pointsToAdd)
+      setUserCurrentPoints(newPoints)
+      return true
+
+    } catch (error) {
+      console.error("Error in addPointsToProfile:", error)
+      return false
+    }
+  }
+
   const onSubmit = async (data: BookFormData) => {
     setIsLoading(true)
     setError(null)
+    setPointsAdded(0)
 
     try {
-      // Get current user
       const { data: { user }, error: userError } = await supabase.auth.getUser()
 
       if (userError || !user) {
         throw new Error("You must be logged in to add a book")
       }
 
-      // Generate unique QR code
       const qrCode = `BOOK-${crypto.randomUUID()}`
 
-      // Final AI Valuation on submit
       let finalPointValue = data.pointValue
       if (!hasAutoValuated) {
         const aiVal = await calculateValueWithAI()
-        finalPointValue = typeof aiVal === 'number' ? aiVal : (aiVal ? parseInt(aiVal) : 10)
+        finalPointValue = typeof aiVal === 'number' ? aiVal : (aiVal ? parseInt(aiVal as any) : 10)
       }
       
       if (isNaN(finalPointValue as number)) finalPointValue = 10
 
-      // Prepare book data
       const bookData = {
         title: data.title,
         author: data.author,
@@ -267,13 +361,13 @@ const calculateValueWithAI = async () => {
         owner_id: user.id,
         point_value: finalPointValue,
         language: data.language || 'English',
-        cover_image: imageBase64, // Store base64 directly in database
+        cover_image: imageBase64,
         qr_code: qrCode,
+        exchange_point_id: data.exchangePointId,
         available: true,
         tags: [],
       }
 
-      // Insert book into database
       const { data: newBook, error: dbError } = await supabase
         .from('books')
         .insert([bookData])
@@ -289,25 +383,42 @@ const calculateValueWithAI = async () => {
         throw new Error("Failed to create book")
       }
 
-      // Record initial "Listed" entry in journey history
+      // Get exchange point info for history
+      const selectedPoint = exchangePoints.find(p => p.id === data.exchangePointId)
+
       const { data: profile } = await supabase
         .from("profiles")
         .select("name, username, location")
         .eq("id", user.id)
         .single()
 
+      // Add points to user's profile - PASS book title
+      const pointsAddedSuccess = await addPointsToProfile(user.id, finalPointValue, data.title)
+
+      // Create exchange history
       await supabase.from("exchange_history").insert({
         book_id: newBook.id,
         from_user_id: user.id,
         to_user_id: user.id,
         from_username: profile?.username || profile?.name || "Curator",
         to_username: "First Listed",
-        city: data.location || profile?.location || "Unknown",
-        notes: "Journey Started - Book added to the library",
+        city: selectedPoint?.city || selectedPoint?.address || "Unknown",
+        notes: `Journey Started - Book added to ${selectedPoint?.name || 'exchange point'}`,
         exchanged_at: new Date().toISOString()
       })
 
-      // Set generated book details for QR code display
+      // Create a notification for points added
+      if (pointsAddedSuccess) {
+        await supabase.from("notifications").insert({
+          user_id: user.id,
+          title: "Points Added!",
+          message: `You earned ⚡${finalPointValue} points for adding "${data.title}" to ${selectedPoint?.name || 'the exchange point'}`,
+          type: "points",
+          read: false,
+          created_at: new Date().toISOString()
+        })
+      }
+
       setGeneratedBookId(newBook.id)
       setGeneratedBookTitle(data.title)
       setGeneratedQRCode(newBook.qr_code)
@@ -315,7 +426,7 @@ const calculateValueWithAI = async () => {
 
       toast({
         title: "✅ Book Added Successfully",
-        description: `"${data.title}" has been added to your collection`,
+        description: `"${data.title}" is now available at ${selectedPoint?.name}. You earned ⚡${finalPointValue} points!`,
       })
 
     } catch (error) {
@@ -340,6 +451,7 @@ const calculateValueWithAI = async () => {
     setError(null)
     setImagePreview(null)
     setImageBase64(null)
+    setPointsAdded(0)
   }
 
   const handleAddAnother = () => {
@@ -347,9 +459,15 @@ const calculateValueWithAI = async () => {
     router.push('/add-book')
   }
 
-  const genre = watch("genre")
-  const condition = watch("condition")
-  const pointValue = watch("pointValue")
+  const handlePointCreated = async (newPoint: ExchangePoint) => {
+    setExchangePoints([...exchangePoints, newPoint])
+    setValue("exchangePointId", newPoint.id)
+    setShowCreatePoint(false)
+    toast({
+      title: "✅ Exchange Point Created",
+      description: `${newPoint.name} has been added`,
+    })
+  }
 
   if (showQRCode) {
     return (
@@ -362,7 +480,9 @@ const calculateValueWithAI = async () => {
                 bookId={generatedBookId} 
                 bookTitle={generatedBookTitle} 
                 qrCode={generatedQRCode}
-                onAddAnother={handleAddAnother} 
+                onAddAnother={handleAddAnother}
+                pointsEarned={pointsAdded}
+                currentPoints={userCurrentPoints}
               />
             </div>
           </div>
@@ -385,8 +505,18 @@ const calculateValueWithAI = async () => {
               </div>
               <h1 className="text-4xl font-bold text-foreground font-serif mb-3">Add a Book</h1>
               <p className="text-lg text-muted-foreground">
-                Share your books with the community and generate a QR code for easy exchanges
+                List your book at an exchange point for others to discover
               </p>
+              
+              {/* Points Display */}
+              <div className="mt-4 inline-flex items-center gap-2 bg-primary/5 px-4 py-2 rounded-full">
+                <Coins className="h-4 w-4 text-primary" />
+                <span className="text-sm font-medium">Your Points:</span>
+                <span className="font-bold text-primary">⚡{userCurrentPoints}</span>
+                <span className="text-xs text-muted-foreground">
+                  (+{pointValue} points when you add this book)
+                </span>
+              </div>
             </div>
 
             <Card className="border-2">
@@ -403,6 +533,7 @@ const calculateValueWithAI = async () => {
 
                 <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
                   <div className="grid sm:grid-cols-2 gap-6">
+                    {/* Title */}
                     <div className="space-y-2 sm:col-span-2">
                       <Label htmlFor="title">
                         Book Title <span className="text-destructive">*</span>
@@ -420,6 +551,7 @@ const calculateValueWithAI = async () => {
                       )}
                     </div>
 
+                    {/* Author */}
                     <div className="space-y-2">
                       <Label htmlFor="author">
                         Author <span className="text-destructive">*</span>
@@ -437,18 +569,20 @@ const calculateValueWithAI = async () => {
                       )}
                     </div>
 
+                    {/* Language */}
                     <div className="space-y-2">
                       <Label htmlFor="language">Language</Label>
                       <Input
                         id="language"
                         type="text"
-                        placeholder="e.g. English, Spanish"
+                        placeholder="e.g. English"
                         {...register("language")}
                         className="h-11"
                         disabled={isLoading}
                       />
                     </div>
 
+                    {/* Genre */}
                     <div className="space-y-2">
                       <Label htmlFor="genre">
                         Genre <span className="text-destructive">*</span>
@@ -479,6 +613,7 @@ const calculateValueWithAI = async () => {
                       )}
                     </div>
 
+                    {/* Condition */}
                     <div className="space-y-2">
                       <Label htmlFor="condition">
                         Condition <span className="text-destructive">*</span>
@@ -504,6 +639,7 @@ const calculateValueWithAI = async () => {
                       )}
                     </div>
 
+                    {/* Publication Year */}
                     <div className="space-y-2">
                       <Label htmlFor="publicationYear">Publication Year</Label>
                       <Input
@@ -523,11 +659,14 @@ const calculateValueWithAI = async () => {
                       )}
                     </div>
 
+                    {/* Point Value */}
                     <div className="space-y-4 sm:col-span-2">
                        <div className="p-4 bg-primary/5 border border-primary/20 rounded-lg flex items-center justify-between">
                          <div>
                            <Label className="text-navy uppercase tracking-wider text-xs font-bold block mb-1">Point Value Appraisal</Label>
-                           <p className="text-sm text-muted-foreground">The value is automatically determined by AI based on rarity, demand, and condition.</p>
+                           <p className="text-sm text-muted-foreground">
+                             You'll earn these points when you add this book
+                           </p>
                          </div>
                          <div className="text-right">
                            {isValuating ? (
@@ -536,7 +675,8 @@ const calculateValueWithAI = async () => {
                                <span className="font-bold font-mono">APPRAISING...</span>
                              </div>
                            ) : hasAutoValuated ? (
-                             <div className="text-2xl font-bold text-primary font-mono bg-primary/10 px-3 py-1 rounded">
+                             <div className="text-2xl font-bold text-primary font-mono bg-primary/10 px-3 py-1 rounded flex items-center gap-2">
+                               <Coins className="h-5 w-5" />
                                ⚡{pointValue}
                              </div>
                            ) : (
@@ -548,72 +688,64 @@ const calculateValueWithAI = async () => {
                        </div>
                     </div>
 
-                    <div className="space-y-2">
-                      <Label htmlFor="language">Language</Label>
-                      <Input
-                        id="language"
-                        type="text"
-                        placeholder="e.g., English"
-                        {...register("language")}
-                        className="h-11"
-                        disabled={isLoading}
-                      />
-                      {errors.language && (
-                        <p className="text-sm text-destructive">{errors.language.message}</p>
+                    {/* Exchange Point Selector */}
+                    <div className="space-y-2 sm:col-span-2">
+                      <Label htmlFor="exchangePoint">
+                        Exchange Point <span className="text-destructive">*</span>
+                      </Label>
+                      <p className="text-xs text-muted-foreground mb-2">
+                        Where will you leave this book for others to pick up?
+                      </p>
+                      
+                      {loadingPoints ? (
+                        <div className="flex items-center justify-center h-11 border rounded-md">
+                          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                          <span className="ml-2 text-sm text-muted-foreground">Loading exchange points...</span>
+                        </div>
+                      ) : (
+                        <>
+                          <Select
+                            value={exchangePointId}
+                            onValueChange={(value) => {
+                              if (value === "create_new") {
+                                setShowCreatePoint(true)
+                              } else {
+                                setValue("exchangePointId", value)
+                              }
+                            }}
+                            disabled={isLoading}
+                          >
+                            <SelectTrigger className="h-11">
+                              <SelectValue placeholder="Select an exchange point" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {exchangePoints.map(point => (
+                                <SelectItem key={point.id} value={point.id}>
+                                  <div className="flex items-center gap-2">
+                                    <MapPin className="h-3 w-3" />
+                                    <span className="font-medium">{point.name}</span>
+                                    <span className="text-xs text-muted-foreground">
+                                      - {point.city || point.address}
+                                    </span>
+                                  </div>
+                                </SelectItem>
+                              ))}
+                              <SelectItem value="create_new">
+                                <div className="flex items-center gap-2 text-primary font-medium">
+                                  <Plus className="h-3 w-3" />
+                                  Create New Exchange Point
+                                </div>
+                              </SelectItem>
+                            </SelectContent>
+                          </Select>
+                          {errors.exchangePointId && (
+                            <p className="text-sm text-destructive">{errors.exchangePointId.message}</p>
+                          )}
+                        </>
                       )}
                     </div>
 
-                    <div className="space-y-2">
-                      <Label htmlFor="location">Preferred Exchange Location (Optional)</Label>
-                      <div className="flex gap-2">
-                        <Input
-                          id="location"
-                          type="text"
-                          placeholder="e.g., Central Park, Coffee Shop on Main St"
-                          {...register("location")}
-                          className="h-11 flex-1"
-                          disabled={isLoading}
-                        />
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          className="h-11 w-11 shrink-0"
-                          title="Pick on Map"
-                          onClick={() => setShowLocationPicker(true)}
-                        >
-                          <MapPin className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          className="h-11 w-11 shrink-0"
-                          title="Use Current Location"
-                          onClick={() => {
-                            if (navigator.geolocation) {
-                              navigator.geolocation.getCurrentPosition(
-                                (pos) => {
-                                  setValue("location", `Lat: ${pos.coords.latitude.toFixed(5)}, Lng: ${pos.coords.longitude.toFixed(5)}`)
-                                },
-                                (err) => {
-                                  console.error("Geolocation error:", err)
-                                  alert("Could not get your location. Please check browser permissions.")
-                                }
-                              )
-                            } else {
-                              alert("Geolocation is not supported by your browser")
-                            }
-                          }}
-                        >
-                          <Navigation className="h-4 w-4" />
-                        </Button>
-                      </div>
-                      {errors.location && (
-                        <p className="text-sm text-destructive">{errors.location.message}</p>
-                      )}
-                    </div>
-
+                    {/* Description */}
                     <div className="space-y-2 sm:col-span-2">
                       <Label htmlFor="description">Description (Optional)</Label>
                       <Textarea
@@ -624,11 +756,9 @@ const calculateValueWithAI = async () => {
                         className="resize-none"
                         disabled={isLoading}
                       />
-                      {errors.description && (
-                        <p className="text-sm text-destructive">{errors.description.message}</p>
-                      )}
                     </div>
 
+                    {/* Cover Image */}
                     <div className="space-y-2 sm:col-span-2">
                       <Label htmlFor="cover">Book Cover Image (Optional)</Label>
                       <div 
@@ -657,15 +787,12 @@ const calculateValueWithAI = async () => {
                             >
                               <X className="h-4 w-4" />
                             </Button>
-                            <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded">
-                              <p className="text-white text-xs font-bold">Click X to remove</p>
-                            </div>
                           </div>
                         ) : (
                           <>
                             <Upload className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
                             <p className="text-sm text-muted-foreground">Click to upload cover photo</p>
-                            <p className="text-xs text-muted-foreground mt-1">JPG, PNG up to 5MB (will be compressed)</p>
+                            <p className="text-xs text-muted-foreground mt-1">JPG, PNG up to 5MB</p>
                           </>
                         )}
                         <input
@@ -677,17 +804,15 @@ const calculateValueWithAI = async () => {
                           disabled={isLoading}
                         />
                       </div>
-                      <p className="text-xs text-muted-foreground mt-2">
-                        Images are compressed and stored as base64 in the database
-                      </p>
                     </div>
                   </div>
 
+                  {/* Submit Buttons */}
                   <div className="flex flex-col sm:flex-row gap-3 pt-4">
                     <Button
                       type="submit"
                       className="flex-1 h-12 bg-primary hover:bg-primary/90 gap-2"
-                      disabled={isLoading}
+                      disabled={isLoading || !exchangePointId}
                     >
                       {isLoading ? (
                         <>
@@ -697,7 +822,7 @@ const calculateValueWithAI = async () => {
                       ) : (
                         <>
                           <QrCode className="h-4 w-4" />
-                          Add Book & Generate QR Code
+                          Add Book & Earn ⚡{pointValue} Points
                         </>
                       )}
                     </Button>
@@ -705,7 +830,7 @@ const calculateValueWithAI = async () => {
                       type="button"
                       variant="outline"
                       onClick={handleReset}
-                      className="sm:w-32 h-12 bg-transparent"
+                      className="sm:w-32 h-12"
                       disabled={isLoading}
                     >
                       Reset
@@ -719,27 +844,13 @@ const calculateValueWithAI = async () => {
       </main>
 
       <Footer />
-      {showLocationPicker && (
-        <LocationPickerModal
-          onClose={() => setShowLocationPicker(false)}
-          initialPosition={(() => {
-            const currentLoc = watch("location");
-            if (currentLoc && currentLoc.startsWith("Lat:")) {
-              const parts = currentLoc.split(",");
-              if (parts.length === 2) {
-                const lat = parseFloat(parts[0].split(":")[1].trim());
-                const lng = parseFloat(parts[1].split(":")[1].trim());
-                if (!isNaN(lat) && !isNaN(lng)) {
-                  return { lat, lng };
-                }
-              }
-            }
-            return null;
-          })()}
-          onSelect={(coords) => {
-            setValue("location", `Lat: ${coords.lat.toFixed(5)}, Lng: ${coords.lng.toFixed(5)}`)
-            setShowLocationPicker(false)
-          }}
+
+      {/* Create Exchange Point Dialog */}
+      {showCreatePoint && (
+        <CreateExchangePointDialog
+          open={showCreatePoint}
+          onOpenChange={setShowCreatePoint}
+          onPointCreated={handlePointCreated}
         />
       )}
     </div>

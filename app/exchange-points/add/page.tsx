@@ -62,7 +62,7 @@ export default function AddExchangePointPage() {
       const { data: { user } } = await supabase.auth.getUser();
 
       if (!user) {
-        alert("You must be logged in to add a point.");
+        // alert("You must be logged in to add a point.");
         return;
       }
 
@@ -80,7 +80,7 @@ export default function AddExchangePointPage() {
       router.refresh();
     } catch (error) {
       console.error(error);
-      alert("Failed to save location");
+      // alert("Failed to save location");
     } finally {
       setIsLoading(false);
     }

@@ -11,12 +11,18 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { BookOpen, Save, Loader2, ArrowLeft } from "lucide-react"
+import { BookOpen, Save, Loader2, ArrowLeft, MapPin, Plus } from "lucide-react"
 import { supabase } from "@/lib/supabase/client"
 import { useRouter, useParams } from "next/navigation"
 import { z } from 'zod'
 import Link from "next/link"
 import { useToast } from "@/hooks/use-toast"
+import dynamic from "next/dynamic"
+
+const CreateExchangePointDialog = dynamic(
+  () => import("@/components/create-exchange-point-dialog"),
+  { ssr: false }
+)
 
 const bookSchema = z.object({
   title: z.string().min(1, 'Title is required').max(200),
@@ -27,10 +33,20 @@ const bookSchema = z.object({
   language: z.string().min(1, 'Language is required'),
   publicationYear: z.coerce.number().nullable().optional(),
   pointValue: z.coerce.number().min(1).max(1000),
+  exchangePointId: z.string().min(1, 'Please select an exchange point'),
   available: z.boolean().default(true),
 })
 
 type BookFormData = z.infer<typeof bookSchema>
+
+interface ExchangePoint {
+  id: string
+  name: string
+  address: string
+  city: string
+  latitude: number
+  longitude: number
+}
 
 export default function EditBookPage() {
   const { id } = useParams()
@@ -38,6 +54,9 @@ export default function EditBookPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [exchangePoints, setExchangePoints] = useState<ExchangePoint[]>([])
+  const [loadingPoints, setLoadingPoints] = useState(true)
+  const [showCreatePoint, setShowCreatePoint] = useState(false)
   const { toast } = useToast()
 
   const {
@@ -50,6 +69,26 @@ export default function EditBookPage() {
   } = useForm<BookFormData>({
     resolver: zodResolver(bookSchema),
   })
+
+  // Fetch exchange points
+  useEffect(() => {
+    const fetchExchangePoints = async () => {
+      setLoadingPoints(true)
+      const { data, error } = await supabase
+        .from("exchange_locations")
+        .select("*")
+        .order("name")
+
+      if (error) {
+        console.error("Error fetching exchange points:", error)
+      } else {
+        setExchangePoints(data || [])
+      }
+      setLoadingPoints(false)
+    }
+
+    fetchExchangePoints()
+  }, [])
 
   useEffect(() => {
     loadBook()
@@ -79,6 +118,7 @@ export default function EditBookPage() {
         language: book.language || 'English',
         publicationYear: book.publication_year,
         pointValue: book.point_value,
+        exchangePointId: book.exchange_point_id || "",
         available: book.available,
       })
     } catch (err: any) {
@@ -104,17 +144,20 @@ export default function EditBookPage() {
           language: data.language,
           publication_year: data.publicationYear,
           point_value: data.pointValue,
+          exchange_point_id: data.exchangePointId, // ✅ UPDATE EXCHANGE POINT
           available: data.available,
           updated_at: new Date().toISOString(),
         })
         .eq("id", id)
 
       if (updateError) throw updateError
+
+      // Get exchange point info for success message
+      const selectedPoint = exchangePoints.find(p => p.id === data.exchangePointId)
       
       toast({
-        title: "Archive Updated",
-        description: "The manuscript details have been successfully amended.",
-        variant: "vintage",
+        title: "✅ Book Updated",
+        description: `"${data.title}" details updated${selectedPoint ? ` and relocated to ${selectedPoint.name}` : ''}`,
       })
 
       router.push("/dashboard")
@@ -123,15 +166,26 @@ export default function EditBookPage() {
       setError(err.message)
       setIsSaving(false)
       toast({
-        title: "Error",
-        description: "Failed to update archive entry: " + err.message,
+        title: "❌ Update Failed",
+        description: err.message,
         variant: "destructive",
       })
     }
   }
 
+  const handlePointCreated = async (newPoint: ExchangePoint) => {
+    setExchangePoints([...exchangePoints, newPoint])
+    setValue("exchangePointId", newPoint.id)
+    setShowCreatePoint(false)
+    toast({
+      title: "✅ Exchange Point Created",
+      description: `${newPoint.name} has been added`,
+    })
+  }
+
   const genre = watch("genre")
   const condition = watch("condition")
+  const exchangePointId = watch("exchangePointId")
 
   if (isLoading) {
     return (
@@ -162,15 +216,19 @@ export default function EditBookPage() {
             </div>
 
             <div className="text-center mb-8">
-              <h1 className="text-4xl font-bold text-foreground font-serif mb-3">Update Archive Entry</h1>
-              <p className="text-lg text-muted-foreground tracking-tight">
-                Amend the details of your document in the global collection.
+              <div className="inline-flex items-center justify-center h-16 w-16 rounded-full bg-primary/10 mb-4">
+                <BookOpen className="h-8 w-8 text-primary" />
+              </div>
+              <h1 className="text-4xl font-bold text-foreground font-serif mb-3">Edit Book Details</h1>
+              <p className="text-lg text-muted-foreground">
+                Update information and change the exchange point location
               </p>
             </div>
 
-            <Card className="border-2 shadow-[4px_4px_0_rgba(42,24,16,0.1)]">
+            <Card className="border-2">
               <CardHeader>
-                <CardTitle className="text-2xl font-serif">Document Specifications</CardTitle>
+                <CardTitle className="text-2xl font-serif">Book Information</CardTitle>
+                <CardDescription>Modify the details of your listed book</CardDescription>
               </CardHeader>
               <CardContent>
                 {error && (
@@ -179,21 +237,27 @@ export default function EditBookPage() {
                   </div>
                 )}
 
-                <form onSubmit={handleSubmit(onSubmit as any)} className="space-y-6">
+                <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
                   <div className="grid sm:grid-cols-2 gap-6">
+                    {/* Title */}
                     <div className="space-y-2 sm:col-span-2">
-                      <Label htmlFor="title">Title</Label>
+                      <Label htmlFor="title">
+                        Book Title <span className="text-destructive">*</span>
+                      </Label>
                       <Input
                         id="title"
                         {...register("title")}
-                        className="h-11 font-serif text-lg"
+                        className="h-11"
                         disabled={isSaving}
                       />
                       {errors.title && <p className="text-sm text-destructive">{errors.title.message}</p>}
                     </div>
 
+                    {/* Author */}
                     <div className="space-y-2">
-                      <Label htmlFor="author">Author</Label>
+                      <Label htmlFor="author">
+                        Author <span className="text-destructive">*</span>
+                      </Label>
                       <Input
                         id="author"
                         {...register("author")}
@@ -203,8 +267,33 @@ export default function EditBookPage() {
                       {errors.author && <p className="text-sm text-destructive">{errors.author.message}</p>}
                     </div>
 
+                    {/* Language */}
                     <div className="space-y-2">
-                      <Label htmlFor="genre">Genre</Label>
+                      <Label htmlFor="language">
+                        Language <span className="text-destructive">*</span>
+                      </Label>
+                      <Select
+                        value={watch("language")}
+                        onValueChange={(v) => setValue("language", v)}
+                        disabled={isSaving}
+                      >
+                        <SelectTrigger id="language" className="h-11">
+                          <SelectValue placeholder="Select language" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {["English", "Spanish", "French", "German", "Chinese", "Japanese", "Arabic", "Portuguese", "Russian", "Urdu", "Hindi"].map(lang => (
+                            <SelectItem key={lang} value={lang}>{lang}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {errors.language && <p className="text-sm text-destructive">{errors.language.message}</p>}
+                    </div>
+
+                    {/* Genre */}
+                    <div className="space-y-2">
+                      <Label htmlFor="genre">
+                        Genre <span className="text-destructive">*</span>
+                      </Label>
                       <Select
                         value={genre}
                         onValueChange={(v) => setValue("genre", v as any)}
@@ -222,8 +311,11 @@ export default function EditBookPage() {
                       {errors.genre && <p className="text-sm text-destructive">{errors.genre.message}</p>}
                     </div>
 
+                    {/* Condition */}
                     <div className="space-y-2">
-                      <Label htmlFor="condition">Condition</Label>
+                      <Label htmlFor="condition">
+                        Condition <span className="text-destructive">*</span>
+                      </Label>
                       <Select
                         value={condition}
                         onValueChange={(v) => setValue("condition", v as any)}
@@ -233,7 +325,7 @@ export default function EditBookPage() {
                           <SelectValue placeholder="Select condition" />
                         </SelectTrigger>
                         <SelectContent>
-                          {["Excellent", "Good", "Fair", "Poor", "Mint"].map(c => (
+                          {["Mint", "Excellent", "Good", "Fair", "Poor"].map(c => (
                             <SelectItem key={c} value={c}>{c}</SelectItem>
                           ))}
                         </SelectContent>
@@ -241,64 +333,135 @@ export default function EditBookPage() {
                       {errors.condition && <p className="text-sm text-destructive">{errors.condition.message}</p>}
                     </div>
 
+                    {/* Publication Year */}
                     <div className="space-y-2">
-                      <Label htmlFor="language">Publication Language</Label>
-                      <Select
-                        value={watch("language")}
-                        onValueChange={(v) => setValue("language", v)}
+                      <Label htmlFor="publicationYear">Publication Year</Label>
+                      <Input
+                        id="publicationYear"
+                        type="number"
+                        {...register("publicationYear", {
+                          setValueAs: (v) => v === "" ? null : Number(v)
+                        })}
+                        min="1000"
+                        max={new Date().getFullYear()}
+                        className="h-11"
                         disabled={isSaving}
-                      >
-                        <SelectTrigger id="language" className="h-11">
-                          <SelectValue placeholder="Select language" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {["English", "Spanish", "French", "German", "Chinese", "Japanese", "Arabic", "Portuguese", "Russian"].map(lang => (
-                            <SelectItem key={lang} value={lang}>{lang}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      {errors.language && <p className="text-sm text-destructive">{errors.language.message}</p>}
+                      />
+                      {errors.publicationYear && <p className="text-sm text-destructive">{errors.publicationYear.message}</p>}
                     </div>
 
+                    {/* Point Value */}
                     <div className="space-y-2">
-                      <Label htmlFor="pointValue">Transaction Points</Label>
+                      <Label htmlFor="pointValue">
+                        Point Value <span className="text-destructive">*</span>
+                      </Label>
                       <Input
                         id="pointValue"
                         type="number"
                         {...register("pointValue")}
                         className="h-11"
                         disabled={isSaving}
+                        min="1"
+                        max="1000"
                       />
                       {errors.pointValue && <p className="text-sm text-destructive">{errors.pointValue.message}</p>}
                     </div>
 
+                    {/* ✅ EXCHANGE POINT SELECTOR */}
                     <div className="space-y-2 sm:col-span-2">
-                      <Label htmlFor="description">Description</Label>
+                      <Label htmlFor="exchangePoint">
+                        Exchange Point Location <span className="text-destructive">*</span>
+                      </Label>
+                      <p className="text-xs text-muted-foreground mb-2">
+                        Where is this book currently located for pickup?
+                      </p>
+                      
+                      {loadingPoints ? (
+                        <div className="flex items-center justify-center h-11 border rounded-md">
+                          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                          <span className="ml-2 text-sm text-muted-foreground">Loading locations...</span>
+                        </div>
+                      ) : (
+                        <>
+                          <Select
+                            value={exchangePointId}
+                            onValueChange={(value) => {
+                              if (value === "create_new") {
+                                setShowCreatePoint(true)
+                              } else {
+                                setValue("exchangePointId", value)
+                              }
+                            }}
+                            disabled={isSaving}
+                          >
+                            <SelectTrigger className="h-11">
+                              <SelectValue placeholder="Select an exchange point" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {exchangePoints.map(point => (
+                                <SelectItem key={point.id} value={point.id}>
+                                  <div className="flex items-center gap-2">
+                                    <MapPin className="h-3 w-3" />
+                                    <span className="font-medium">{point.name}</span>
+                                    <span className="text-xs text-muted-foreground">
+                                      - {point.city || point.address}
+                                    </span>
+                                  </div>
+                                </SelectItem>
+                              ))}
+                              <SelectItem value="create_new">
+                                <div className="flex items-center gap-2 text-primary font-medium">
+                                  <Plus className="h-3 w-3" />
+                                  Create New Exchange Point
+                                </div>
+                              </SelectItem>
+                            </SelectContent>
+                          </Select>
+                          {errors.exchangePointId && (
+                            <p className="text-sm text-destructive">{errors.exchangePointId.message}</p>
+                          )}
+                        </>
+                      )}
+                    </div>
+
+                    {/* Description */}
+                    <div className="space-y-2 sm:col-span-2">
+                      <Label htmlFor="description">Description (Optional)</Label>
                       <Textarea
                         id="description"
                         {...register("description")}
-                        rows={5}
-                        className="resize-none font-serif text-base leading-relaxed"
+                        rows={4}
+                        className="resize-none"
                         disabled={isSaving}
                       />
                       {errors.description && <p className="text-sm text-destructive">{errors.description.message}</p>}
                     </div>
                   </div>
 
-                  <div className="flex gap-4 pt-4">
+                  {/* Submit Buttons */}
+                  <div className="flex flex-col sm:flex-row gap-3 pt-4">
                     <Button 
                       type="submit" 
-                      className="flex-1 h-12 bg-primary hover:bg-primary/90 gap-2 text-lg"
-                      disabled={isSaving}
+                      className="flex-1 h-12 bg-primary hover:bg-primary/90 gap-2"
+                      disabled={isSaving || !exchangePointId}
                     >
-                      {isSaving ? <Loader2 className="h-5 w-5 animate-spin" /> : <Save className="h-5 w-5" />}
-                      {isSaving ? "Saving Changes..." : "Commit Update"}
+                      {isSaving ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Saving Changes...
+                        </>
+                      ) : (
+                        <>
+                          <Save className="h-4 w-4" />
+                          Save Changes
+                        </>
+                      )}
                     </Button>
                     <Button
                       type="button"
                       variant="outline"
                       onClick={() => router.push("/dashboard")}
-                      className="h-12 px-8"
+                      className="sm:w-32 h-12"
                       disabled={isSaving}
                     >
                       Cancel
@@ -312,6 +475,15 @@ export default function EditBookPage() {
       </main>
 
       <Footer />
+
+      {/* Create Exchange Point Dialog */}
+      {showCreatePoint && (
+        <CreateExchangePointDialog
+          open={showCreatePoint}
+          onOpenChange={setShowCreatePoint}
+          onPointCreated={handlePointCreated}
+        />
+      )}
     </div>
   )
 }

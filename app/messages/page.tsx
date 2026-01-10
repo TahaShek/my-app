@@ -16,6 +16,7 @@ import type { Profile } from "@/lib/types/database"
 import { supabase } from "@/lib/supabase/client"
 import { handleForegroundMessage } from "@/lib/push"
 import { messaging } from "@/lib/firebase"
+import { Header } from "@/components/header"
 
 export default function MessagesPage() {
   const [profiles, setProfiles] = useState<Profile[]>([])
@@ -84,6 +85,8 @@ export default function MessagesPage() {
   )
 
   return (
+          <div className="min-h-screen flex flex-col bg-background">
+            <Header />
     <div className="flex flex-col h-screen bg-[#F5EFE7]">
       <div className="bg-[#1a365d] text-[#D4AF37] px-6 py-3 shadow-md border-b-4 border-[#D4AF37] z-20 sticky top-0">
         <div className="flex items-center gap-3">
@@ -120,28 +123,7 @@ export default function MessagesPage() {
           </div>
 
           <div className="flex-1 overflow-y-auto p-2 space-y-2">
-            <button
-              onClick={() => { setSelectedProfile(null); if (window.innerWidth < 768) setIsSidebarOpen(false); }}
-              className={cn(
-                "w-full flex items-center gap-3 p-3 border-2 transition-all hover:scale-105 text-left group",
-                !selectedProfile
-                  ? "bg-[#FFF8DC] border-[#D4AF37] shadow-[4px_4px_0px_rgba(212,175,55,0.3)]"
-                  : "bg-white border-[#8B7355] hover:border-[#D4AF37]"
-              )}
-            >
-              <div className={cn(
-                "size-10 flex items-center justify-center border-2 transition-colors",
-                !selectedProfile
-                  ? "bg-[#1a365d] border-[#1a365d] text-[#D4AF37]"
-                  : "bg-[#FAF6F0] border-[#8B7355] text-[#8B7355]"
-              )}>
-                <Hash className="size-5" />
-              </div>
-              <div className="flex-1 truncate">
-                <div className="font-serif font-bold text-[#1a365d]">General Bureau</div>
-                <div className="text-xs font-mono text-[#8B7355]">Public Board</div>
-              </div>
-            </button>
+
 
             <div className="px-3 py-2 text-[10px] font-bold text-[#8B7355] uppercase tracking-widest mt-4 font-mono border-b border-dashed border-[#8B7355] mb-2">
               Direct Correspondences
@@ -322,5 +304,7 @@ export default function MessagesPage() {
         </div>
       </div>
     </div>
+    </div>
+
   )
 }

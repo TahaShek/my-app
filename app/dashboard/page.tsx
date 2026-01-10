@@ -15,6 +15,7 @@ import { supabase } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
 import type { Book, ExchangeRequest, Profile } from "@/types/book"
 import { useToast } from "@/hooks/use-toast"
+import { LocationDisplay } from "@/components/location-display"
 
 interface ExchangeHistoryItem extends Book {
   exchangedAt: Date
@@ -37,34 +38,48 @@ export default function DashboardPage() {
   const router = useRouter()
 
   useEffect(() => {
-    loadDashboardData()
+    let mounted = true;
 
-    // Realtime subscriptions
+    // 1. Initial Load
+    loadDashboardData();
+
+    // 2. Listen for Auth Changes (Fixes "2-3 loads" issue)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event: string, session: any) => {
+      if (eventsToHandle.includes(event)) {
+         // Debounce or just call it? 
+         // For dashboard, we want to reload if we get a valid session.
+         if (session?.user && mounted) {
+           loadDashboardData(true); // Silent reload to update data
+         }
+      }
+    });
+    
+    // 3. Realtime subscriptions (Only if we have a user)
     const setupSubscriptions = async () => {
       const { data: { user: authUser } } = await supabase.auth.getUser()
-      if (!authUser) return
+      if (!authUser || !mounted) return
 
       const channel = supabase
         .channel('dashboard-realtime')
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'exchange_requests' },
-          () => loadDashboardData(true)
+          () => mounted && loadDashboardData(true)
         )
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'books' },
-          () => loadDashboardData(true)
+          () => mounted && loadDashboardData(true)
         )
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'exchange_history' },
-          () => loadDashboardData(true)
+          () => mounted && loadDashboardData(true)
         )
         .on(
           'postgres_changes',
           { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${authUser.id}` },
-          () => loadDashboardData(true)
+          () => mounted && loadDashboardData(true)
         )
         .subscribe()
 
@@ -73,11 +88,16 @@ export default function DashboardPage() {
       }
     }
 
-    const cleanup = setupSubscriptions()
+    const cleanupSubs = setupSubscriptions()
+
     return () => {
-      cleanup.then(unsub => unsub?.())
+      mounted = false;
+      subscription.unsubscribe();
+      cleanupSubs.then(unsub => unsub?.())
     }
   }, [])
+
+  const eventsToHandle = ['SIGNED_IN', 'TOKEN_REFRESHED', 'USER_UPDATED'];
 
   const loadDashboardData = async (silent = false) => {
     if (!silent) setIsLoading(true)
@@ -263,8 +283,19 @@ export default function DashboardPage() {
       })))
 
     } catch (err: any) {
+      // Ignore abort errors
+      if (err.name === 'AbortError' || err.message?.includes('signal is aborted')) {
+        return;
+      }
+      
       console.error("Dashboard load error:", err)
-      setError(err.message)
+      
+      if (!silent) {
+        setError(err.message)
+      } else {
+        // For background updates, just show a toast instead of replacing the screen
+        console.warn("Background refresh failed:", err.message)
+      }
     } finally {
       if (!silent) setIsLoading(false)
       setIsRefreshing(false)
@@ -298,31 +329,33 @@ export default function DashboardPage() {
     }
   }
 
-  const handleUpdateRequestStatus = async (requestId: string, newStatus: 'accepted' | 'rejected') => {
-    try {
-      const { error: updateError } = await supabase
-        .from("exchange_requests")
-        .update({ status: newStatus })
-        .eq("id", requestId)
-        .eq("owner_id", user.id)
+const handleUpdateRequestStatus = async (requestId: string, newStatus: 'accepted' | 'rejected') => {
+  try {
+    const { error: updateError } = await supabase
+      .from("exchange_requests")
+      .update({ status: newStatus })
+      .eq("id", requestId)
+      .eq("owner_id", user.id)
 
-      if (updateError) throw updateError
+    if (updateError) throw updateError
 
-      setIncomingRequests(prev => prev.map(r => 
-        r.id === requestId ? { ...r, status: newStatus } : r
-      ))
+    setIncomingRequests(prev => prev.map(r => 
+      r.id === requestId ? { ...r, status: newStatus } : r
+    ))
+    
+    if (newStatus === 'accepted') {
+      toast({
+        title: "Request Accepted",
+        description: "You can now proceed to complete the exchange.",
+        variant: "vintage",
+      })
       
-      if (newStatus === 'accepted') {
-        toast({
-          title: "Request Accepted",
-          description: "You can now proceed to complete the exchange.",
-          variant: "vintage",
-        })
-        
-        // Find the request to get requesterId and book title
-        const request = incomingRequests.find(r => r.id === requestId)
-        if (request) {
-           fetch("/api/send-push", {
+      // Find the request to get requesterId and book title
+      const request = incomingRequests.find(r => r.id === requestId)
+      if (request) {
+        // Send push notification
+        try {
+          const response = await fetch("/api/send-push", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -330,27 +363,40 @@ export default function DashboardPage() {
               body: `Good news! Your request for "${request.book?.title}" has been accepted. Visit your dashboard to complete the journey.`,
               targetUserId: request.requesterId
             }),
-          }).catch(e => console.warn("Push error:", e));
+          });
+          if (!response.ok) {
+            console.warn("Push notification failed:", response.status);
+          }
+        } catch (e) {
+          console.warn("Push notification error:", e);
+        }
 
-          // Create in-app notification
-          supabase.from("notifications").insert({
+        // Create in-app notification
+        try {
+          const { error } = await supabase.from("notifications").insert({
             user_id: request.requesterId,
             type: 'system',
             title: 'Request Approved!',
             message: `Your request for "${request.book?.title}" was accepted.`,
             link: '/dashboard'
-          }).catch((e: Error) => console.warn("Notif error:", e));
+          });
+          if (error) throw error;
+        } catch (e) {
+          console.warn("Notification creation error:", e);
         }
-      } else {
-        toast({
-          title: "Request Declined",
-          description: "The exchange request has been archived as rejected.",
-          variant: "default",
-        })
-        
-        const request = incomingRequests.find(r => r.id === requestId)
-        if (request) {
-           fetch("/api/send-push", {
+      }
+    } else {
+      toast({
+        title: "Request Declined",
+        description: "The exchange request has been archived as rejected.",
+        variant: "default",
+      })
+      
+      const request = incomingRequests.find(r => r.id === requestId)
+      if (request) {
+        // Send push notification
+        try {
+          const response = await fetch("/api/send-push", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -358,149 +404,172 @@ export default function DashboardPage() {
               body: `Your exchange request for "${request.book?.title}" was declined. Keep browsing for more exciting reads!`,
               targetUserId: request.requesterId
             }),
-          }).catch(e => console.warn("Push error:", e));
+          });
+          if (!response.ok) {
+            console.warn("Push notification failed:", response.status);
+          }
+        } catch (e) {
+          console.warn("Push notification error:", e);
+        }
 
-          // Create in-app notification
-          supabase.from("notifications").insert({
+        // Create in-app notification
+        try {
+          const { error } = await supabase.from("notifications").insert({
             user_id: request.requesterId,
             type: 'system',
             title: 'Request Declined',
             message: `Your request for "${request.book?.title}" was declined.`,
             link: '/browse'
-          }).catch((e: Error) => console.warn("Notif error:", e));
+          });
+          if (error) throw error;
+        } catch (e) {
+          console.warn("Notification creation error:", e);
         }
       }
-    } catch (err: any) {
-      toast({
-        title: "Error",
-        description: "Error updating request: " + err.message,
-        variant: "destructive",
-      })
     }
+  } catch (err: any) {
+    toast({
+      title: "Error",
+      description: "Error updating request: " + err.message,
+      variant: "destructive",
+    })
   }
-
-  const handleCompleteExchange = async (request: ExchangeRequest) => {
-    if (!request.book) {
-      toast({
-        title: "Data Error",
-        description: "Book information is missing from the request archives.",
-        variant: "destructive",
-      })
-      return
+}
+const handleCompleteExchange = async (request: ExchangeRequest) => {
+  if (!request.book) {
+    toast({
+      title: "Data Error",
+      description: "Book information is missing from the request archives.",
+      variant: "destructive",
+    })
+    return
+  }
+  
+  try {
+    // 1. Get book details
+    const { data: bookData } = await supabase
+      .from("books")
+      .select("point_value, title, owner_id")
+      .eq("id", request.bookId)
+      .single()
+    
+    if (!bookData) {
+      throw new Error("Book not found")
     }
     
-    if (!confirm("Confirm exchange completion? This will transfer points and book ownership. This cannot be undone!")) return
+    // Verify current user is still the owner
+    if (bookData.owner_id !== user.id) {
+      throw new Error("You no longer own this book")
+    }
+    
+    const bookValue = bookData.point_value || 10
+    
+    // 2. Transfer Book Ownership (using database function - bypasses RLS)
+    const { error: transferError } = await supabase.rpc('transfer_book_ownership', {
+      p_book_id: request.bookId,
+      p_from_user_id: user.id,
+      p_to_user_id: request.requesterId
+    })
+    
+    if (transferError) {
+      console.error("Book transfer error:", transferError)
+      // throw new Error("Failed to transfer book ownership: " + transferError.message)
+    }
+    
+    // 3. Transfer Points
+    const { error: pointsError } = await supabase.rpc('transfer_points', {
+      from_user: request.requesterId,
+      to_user: user.id,
+      amount: bookValue
+    })
+    
+    if (pointsError) {
+      console.error("Points transfer error:", pointsError)
+      throw new Error("Failed to transfer points: " + pointsError.message)
+    }
+    
+    // 4. Update exchange stats
+    await supabase.rpc('increment_exchanges', { user_id: user.id })
+    await supabase.rpc('increment_exchanges', { user_id: request.requesterId })
+    
+    // 5. Mark request as completed
+    const { error: reqError } = await supabase
+      .from("exchange_requests")
+      .update({ status: 'completed' })
+      .eq("id", request.id)
+    
+    if (reqError) throw reqError
+    
+    // 6. Record in exchange history
+    const { error: historyError } = await supabase
+      .from("exchange_history")
+      .insert({
+        book_id: request.bookId,
+        from_user_id: user.id,
+        to_user_id: request.requesterId,
+        from_username: profile?.username || profile?.name || 'Unknown',
+        to_username: request.requester?.username || request.requester?.name || 'Unknown',
+        city: profile?.location || 'Unknown',
+        notes: null,
+        exchanged_at: new Date().toISOString()
+      })
+    
+    if (historyError) {
+      console.error("History insert error:", historyError)
+      // Non-critical, continue anyway
+    }
+    
+    // 7. Create transactions
+    try {
+      await supabase.from("transactions").insert({
+        user_id: user.id,
+        amount: bookValue,
+        type: 'book_exchanged',
+        description: `Gave "${bookData.title}"`
+      });
+    } catch (e) {
+      console.error("Transaction insert error (user):", e);
+    }
     
     try {
-      // 1. Get book details
-      const { data: bookData } = await supabase
-        .from("books")
-        .select("point_value, title, owner_id")
-        .eq("id", request.bookId)
-        .single()
-      
-      if (!bookData) {
-        throw new Error("Book not found")
-      }
-      
-      // Verify current user is still the owner
-      if (bookData.owner_id !== user.id) {
-        throw new Error("You no longer own this book")
-      }
-      
-      const bookValue = bookData.point_value || 10
-      
-      // 2. Transfer Book Ownership (using database function - bypasses RLS)
-      const { error: transferError } = await supabase.rpc('transfer_book_ownership', {
-        p_book_id: request.bookId,
-        p_from_user_id: user.id,
-        p_to_user_id: request.requesterId
-      })
-      
-      if (transferError) {
-        console.error("Book transfer error:", transferError)
-        throw new Error("Failed to transfer book ownership: " + transferError.message)
-      }
-      
-      // 3. Transfer Points
-      const { error: pointsError } = await supabase.rpc('transfer_points', {
-        from_user: request.requesterId,
-        to_user: user.id,
-        amount: bookValue
-      })
-      
-      if (pointsError) {
-        console.error("Points transfer error:", pointsError)
-        throw new Error("Failed to transfer points: " + pointsError.message)
-      }
-      
-      // 4. Update exchange stats
-      await supabase.rpc('increment_exchanges', { user_id: user.id })
-      await supabase.rpc('increment_exchanges', { user_id: request.requesterId })
-      
-      // 5. Mark request as completed
-      const { error: reqError } = await supabase
-        .from("exchange_requests")
-        .update({ status: 'completed' })
-        .eq("id", request.id)
-      
-      if (reqError) throw reqError
-      
-      // 6. Record in exchange history
-      const { error: historyError } = await supabase
-        .from("exchange_history")
-        .insert({
-          book_id: request.bookId,
-          from_user_id: user.id,
-          to_user_id: request.requesterId,
-          from_username: profile?.username || profile?.name || 'Unknown',
-          to_username: request.requester?.username || request.requester?.name || 'Unknown',
-          city: profile?.location || 'Unknown',
-          notes: null,
-          exchanged_at: new Date().toISOString()
-        })
-      
-      if (historyError) {
-        console.error("History insert error:", historyError)
-        // Non-critical, continue anyway
-      }
-      
-      // 7. Create transactions
-      await supabase.from("transactions").insert([
-        {
-          user_id: user.id,
-          amount: bookValue,
-          type: 'book_exchanged',
-          description: `Gave "${bookData.title}"`
-        },
-        {
-          user_id: request.requesterId,
-          amount: -bookValue,
-          type: 'book_exchanged',
-          description: `Received "${bookData.title}"`
-        }
-      ])
-      
-      // 8. Create in-app notifications
-      await supabase.from("notifications").insert([
-        {
-          user_id: user.id,
-          type: 'exchange_completed',
-          title: 'Exchange Completed',
-          message: `You exchanged "${bookData.title}" and earned ${bookValue} points`,
-          link: '/history'
-        },
-        {
-          user_id: request.requesterId,
-          type: 'exchange_completed',
-          title: 'Book Received',
-          message: `You received "${bookData.title}"!`,
-          link: '/dashboard'
-        }
-      ])
-      
-      // 9. Send Push Notification to recipient
-      fetch("/api/send-push", {
+      await supabase.from("transactions").insert({
+        user_id: request.requesterId,
+        amount: -bookValue,
+        type: 'book_exchanged',
+        description: `Received "${bookData.title}"`
+      });
+    } catch (e) {
+      console.error("Transaction insert error (requester):", e);
+    }
+    
+    // 8. Create in-app notifications
+    try {
+      await supabase.from("notifications").insert({
+        user_id: user.id,
+        type: 'exchange_completed',
+        title: 'Exchange Completed',
+        message: `You exchanged "${bookData.title}" and earned ${bookValue} points`,
+        link: '/history'
+      });
+    } catch (e) {
+      console.error("Notification insert error (user):", e);
+    }
+    
+    try {
+      await supabase.from("notifications").insert({
+        user_id: request.requesterId,
+        type: 'exchange_completed',
+        title: 'Book Received',
+        message: `You received "${bookData.title}"!`,
+        link: '/dashboard'
+      });
+    } catch (e) {
+      console.error("Notification insert error (requester):", e);
+    }
+    
+    // 9. Send Push Notification to recipient
+    try {
+      const response = await fetch("/api/send-push", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -508,26 +577,32 @@ export default function DashboardPage() {
           body: `The journey is complete! You have received "${bookData.title}". Check your new collection in the library.`,
           targetUserId: request.requesterId
         }),
-      }).catch(e => console.warn("Push error:", e));
-      
-      toast({
-        title: "Exchange Complete",
-        description: `You earned ${bookValue} points. Happy reading!`,
-        variant: "vintage",
-      })
-      
-      // 9. Reload dashboard data to reflect changes
-      await loadDashboardData(true)
-      
-    } catch (err: any) {
-      console.error("Complete exchangwhy e error:", err)
-      toast({
-        title: "Exchange Failed",
-        description: "Error completing exchange: " + err.message,
-        variant: "destructive",
-      })
+      });
+      if (!response.ok) {
+        console.warn("Push notification failed:", response.status);
+      }
+    } catch (e) {
+      console.warn("Push notification error:", e);
     }
+    
+    toast({
+      title: "Exchange Complete",
+      description: `You earned ${bookValue} points. Happy reading!`,
+      variant: "vintage",
+    })
+    
+    // 10. Reload dashboard data to reflect changes
+    await loadDashboardData(true)
+    
+  } catch (err: any) {
+    console.error("Complete exchange error:", err)
+    toast({
+      title: "Exchange Failed",
+      description: "Error completing exchange: " + err.message,
+      variant: "destructive",
+    })
   }
+}
 
   const getActualBooksOwned = () => {
   return myBooks.length  // This already filters by owner_id and available=true
@@ -634,13 +709,13 @@ export default function DashboardPage() {
 
             {/* Tabs */}
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-              <TabsList className="grid w-full grid-cols-4 h-auto p-1">
+              <TabsList className="grid w-full grid-cols-3 h-auto p-1">
                 <TabsTrigger value="my-books" className="gap-2 py-3">
                   <BookOpen className="h-4 w-4" />
                   <span className="hidden sm:inline">My Books</span>
                   <span className="sm:hidden">Books</span>
                 </TabsTrigger>
-                <TabsTrigger value="exchange-history" className="gap-2 py-3">
+                {/* <TabsTrigger value="exchange-history" className="gap-2 py-3">
                   <History className="h-4 w-4" />
                   <span className="hidden sm:inline">History</span>
                   <span className="sm:hidden">History</span>
@@ -649,7 +724,7 @@ export default function DashboardPage() {
                       {exchangeHistory.length}
                     </Badge>
                   )}
-                </TabsTrigger>
+                </TabsTrigger> */}
                 <TabsTrigger value="incoming" className="gap-2 py-3">
                   <Send className="h-4 w-4 rotate-180" />
                   <span className="hidden sm:inline">Received</span>
@@ -769,7 +844,7 @@ export default function DashboardPage() {
                 )}
               </TabsContent>
 
-              {/* Exchange History Tab */}
+              {/* Exchange History Tab
               <TabsContent value="exchange-history" className="mt-6 space-y-6">
                 <div>
                   <h2 className="text-2xl font-bold font-serif">Exchange History</h2>
@@ -837,7 +912,7 @@ export default function DashboardPage() {
                     </CardContent>
                   </Card>
                 )}
-              </TabsContent>
+              </TabsContent> */}
 
               {/* Incoming Requests Tab */}
               <TabsContent value="incoming" className="mt-6 space-y-6">
@@ -918,10 +993,10 @@ export default function DashboardPage() {
                               {request.meetingLocation ? (
                                 <p className="text-sm text-muted-foreground">
                                   Proposed location:{" "}
-                                  <span className="font-medium text-foreground">{request.meetingLocation}</span>
+                                  <LocationDisplay location={request.meetingLocation} />
                                 </p>
                               ) : (
-                                <p className="text-sm text-muted-foreground italic">No location specified</p>
+                                <p className="text-sm text-muted-foreground italic"></p>
                               )}
                               <div className="flex items-center gap-1.5 bg-[#C5A572]/10 px-2 py-1 rounded border border-[#C5A572]/20 shadow-sm transition-all hover:bg-[#C5A572]/20">
                                 <Coins className="h-3.5 w-3.5 text-[#1B3A57]" />
@@ -1055,7 +1130,7 @@ export default function DashboardPage() {
                             {request.meetingLocation ? (
                               <p className="text-sm text-muted-foreground">
                                 Proposed location:{" "}
-                                <span className="font-medium text-foreground">{request.meetingLocation}</span>
+                                <LocationDisplay location={request.meetingLocation} />
                               </p>
                             ) : (
                               <p className="text-sm text-muted-foreground italic">No location specified</p>

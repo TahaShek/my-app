@@ -4,21 +4,21 @@ import { Spectral, Playfair_Display, Courier_Prime } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
 import "./globals.css"
 
-const _spectral = Spectral({
+const spectral = Spectral({
   weight: ["400", "500", "600", "700"],
   style: ["normal", "italic"],
   subsets: ["latin"],
   variable: "--font-sans",
 })
 
-const _playfairDisplay = Playfair_Display({
+const playfairDisplay = Playfair_Display({
   weight: ["400", "500", "600", "700", "800", "900"],
   style: ["normal", "italic"],
   subsets: ["latin"],
   variable: "--font-serif",
 })
 
-const _courierPrime = Courier_Prime({
+const courierPrime = Courier_Prime({
   weight: ["400", "700"],
   subsets: ["latin"],
   variable: "--font-mono",
@@ -50,6 +50,7 @@ export const metadata: Metadata = {
 
 import { Toaster } from "@/components/ui/toaster"
 import { PushNotificationManager } from "@/components/push-notification-manager"
+import { Suspense } from "react"
 
 export default function RootLayout({
   children,
@@ -59,9 +60,12 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`font-sans antialiased ${_spectral.variable} ${_playfairDisplay.variable} ${_courierPrime.variable}`}
+        className={`font-sans antialiased ${spectral.variable} ${playfairDisplay.variable} ${courierPrime.variable}`}
       >
-        <PushNotificationManager />
+        {/* Wrap in Suspense to prevent blocking */}
+        <Suspense fallback={null}>
+          <PushNotificationManager />
+        </Suspense>
         {children}
         <Toaster />
         <Analytics />

@@ -1,17 +1,20 @@
 "use client"
 
 import type React from "react"
-
 import { useState } from "react"
 import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Checkbox } from "@/components/ui/checkbox"
-import { Coins, CreditCard, Check, Zap } from "lucide-react"
+import { Coins, Check, Zap, Loader2 } from "lucide-react"
+import { loadStripe } from "@stripe/stripe-js"
+import { Elements } from "@stripe/react-stripe-js"
+import { CheckoutForm } from "@/components/checkout-form"
+import { useToast } from "@/hooks/use-toast"
+
+// Initialize Stripe
+const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!);
 
 const packages = [
   {
@@ -45,28 +48,68 @@ export default function BuyPointsPage() {
   const [selectedPackage, setSelectedPackage] = useState<string | null>(null)
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [showSuccessModal, setShowSuccessModal] = useState(false)
-  const [agreeToTerms, setAgreeToTerms] = useState(false)
+  const [clientSecret, setClientSecret] = useState<string | null>(null)
+  const [isLoading, setIsLoading] = useState(false)
+  const { toast } = useToast()
 
   const currentPackage = packages.find((p) => p.id === selectedPackage)
 
-  const handlePurchase = (packageId: string) => {
+  const handlePurchase = async (packageId: string) => {
     setSelectedPackage(packageId)
-    setShowPaymentModal(true)
+    setIsLoading(true)
+    
+    try {
+      const res = await fetch("/api/create-payment-intent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ packageId }),
+      })
+
+      if (!res.ok) {
+        if (res.status === 401) {
+             toast({
+              title: "Login Required",
+              description: "Please log in to purchase points.",
+              variant: "destructive"
+            })
+            return;
+        }
+        throw new Error("Failed to initialize payment")
+      }
+
+      const data = await res.json()
+      setClientSecret(data.clientSecret)
+      setShowPaymentModal(true)
+    } catch (error) {
+      console.error("Purchase error:", error)
+      toast({
+        title: "Error",
+        description: "Could not start purchase process. Please try again.",
+        variant: "destructive"
+      })
+    } finally {
+      setIsLoading(false)
+    }
   }
 
-  const handlePaymentSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    // Mock payment processing
+  const handlePaymentSuccess = () => {
     setShowPaymentModal(false)
     setShowSuccessModal(true)
 
-    // Simulate coin animation
-    setTimeout(() => {
-      setShowSuccessModal(false)
-      setSelectedPackage(null)
-      setAgreeToTerms(false)
-    }, 3000)
+    // Reset state after showing success for a while
+    /* Note: In a real app, webhook handles the points update reliably. 
+       The UI update relies on realtime (which we have in Header) or user refresh. */
   }
+
+const handleCloseSuccess = () => {
+  setShowSuccessModal(false)
+  setSelectedPackage(null)
+  setClientSecret(null)
+
+  // Reload the page to fetch updated points from Supabase
+  // window.location.reload()
+}
+
 
   return (
     <div className="min-h-screen flex flex-col bg-parchment">
@@ -191,9 +234,10 @@ export default function BuyPointsPage() {
                         {pkg.description}
                       </p>
 
-                      {/* Purchase Button - Cash Check Stamp Style */}
+                      {/* Purchase Button */}
                       <Button
                         onClick={() => handlePurchase(pkg.id)}
+                        disabled={isLoading && selectedPackage === pkg.id}
                         className={`w-full h-auto py-4 ${
                           pkg.isPopular
                             ? "bg-visa-green hover:bg-visa-green/90 border-4 border-visa-green/60"
@@ -205,7 +249,11 @@ export default function BuyPointsPage() {
                           letterSpacing: "2px",
                         }}
                       >
-                        <Check className="h-5 w-5 mr-2" />
+                         {isLoading && selectedPackage === pkg.id ? (
+                           <Loader2 className="h-5 w-5 animate-spin mr-2" />
+                         ) : (
+                           <Check className="h-5 w-5 mr-2" />
+                         )}
                         PURCHASE CHECK
                       </Button>
                     </CardContent>
@@ -244,13 +292,13 @@ export default function BuyPointsPage() {
               Secure Payment Processing
             </DialogTitle>
             <DialogDescription className="text-center text-navy/70 pt-2" style={{ fontFamily: "'Spectral', serif" }}>
-              Complete your purchase securely
+              Complete your purchase securely via Stripe
             </DialogDescription>
           </DialogHeader>
 
-          <form onSubmit={handlePaymentSubmit} className="space-y-6 pt-4">
-            {/* Package Summary */}
-            <div className="bg-navy/5 border-2 border-navy/20 p-4 rounded">
+          <div className="space-y-6 pt-4">
+             {/* Package Summary */}
+             <div className="bg-navy/5 border-2 border-navy/20 p-4 rounded">
               <div className="flex justify-between items-center mb-2">
                 <span
                   className="text-sm uppercase tracking-wider text-navy"
@@ -275,105 +323,32 @@ export default function BuyPointsPage() {
               </div>
             </div>
 
-            {/* Divider */}
-            <div className="border-t-2 border-navy/30" />
-
-            {/* Payment Method */}
-            <div className="space-y-4">
-              <Label className="text-navy uppercase tracking-wider" style={{ fontFamily: "'Courier New', monospace" }}>
-                Payment Method:
-              </Label>
-
-              <div className="border-2 border-navy bg-white p-4 space-y-3">
-                <div className="flex items-center gap-2 text-navy font-medium">
-                  <CreditCard className="h-5 w-5" />
-                  <span>Credit Card</span>
-                </div>
-                <div className="space-y-2">
-                  <Input type="text" placeholder="Card Number" className="border-2 border-navy/30" required />
-                  <div className="grid grid-cols-2 gap-2">
-                    <Input type="text" placeholder="MM / YY" className="border-2 border-navy/30" required />
-                    <Input type="text" placeholder="CVV" className="border-2 border-navy/30" required />
-                  </div>
-                </div>
-              </div>
-
-              <div className="text-center text-sm text-navy/50" style={{ fontFamily: "'Spectral', serif" }}>
-                OR
-              </div>
-
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full border-2 border-airmail-blue text-airmail-blue hover:bg-airmail-blue/10 bg-transparent"
-              >
-                🅿️ Pay with PayPal
-              </Button>
-            </div>
-
-            {/* Terms Agreement */}
-            <div className="flex items-start gap-2">
-              <Checkbox
-                id="terms"
-                checked={agreeToTerms}
-                onCheckedChange={(checked) => setAgreeToTerms(checked as boolean)}
-                className="mt-1"
-                required
-              />
-              <label
-                htmlFor="terms"
-                className="text-sm text-navy/70 cursor-pointer"
-                style={{ fontFamily: "'Spectral', serif" }}
-              >
-                I agree to payment terms and conditions
-              </label>
-            </div>
-
-            {/* Divider */}
-            <div className="border-t-2 border-navy/30" />
-
-            {/* Action Buttons */}
-            <div className="flex gap-3">
-              <Button
-                type="button"
-                variant="outline"
-                className="flex-1 border-2 border-navy text-navy bg-transparent"
-                onClick={() => setShowPaymentModal(false)}
-              >
-                CANCEL
-              </Button>
-              <Button
-                type="submit"
-                disabled={!agreeToTerms}
-                className="flex-1 bg-visa-green hover:bg-visa-green/90 text-parchment border-4 border-visa-green/60"
-                style={{
-                  fontFamily: "'Impact', sans-serif",
-                  letterSpacing: "1px",
-                }}
-              >
-                COMPLETE PURCHASE
-              </Button>
-            </div>
-
-            {/* Secure Checkout */}
-            <div className="text-center text-sm text-navy/60 flex items-center justify-center gap-2">
-              <span className="text-lg">🔒</span>
-              <span>Secure checkout</span>
-            </div>
-
-            {/* Note for Hackathon */}
-            <div className="bg-warning-yellow/20 border-2 border-warning-yellow p-3 rounded text-center">
-              <p className="text-xs text-navy" style={{ fontFamily: "'Spectral', serif" }}>
-                Note: This is a simulated payment for demonstration purposes
-              </p>
-            </div>
-          </form>
+            {clientSecret && (
+                <Elements stripe={stripePromise} options={{ 
+                    clientSecret,
+                    appearance: {
+                         theme: 'stripe',
+                         variables: {
+                             colorPrimary: '#2e7d32', // Visa green
+                             fontFamily: '"Courier Prime", monospace',
+                         }
+                    }
+                }}>
+                    <CheckoutForm onSuccess={handlePaymentSuccess} />
+                </Elements>
+            )}
+           
+          </div>
         </DialogContent>
       </Dialog>
 
       {/* Success Modal */}
-      <Dialog open={showSuccessModal} onOpenChange={setShowSuccessModal}>
+      <Dialog open={showSuccessModal} onOpenChange={handleCloseSuccess}>
         <DialogContent className="bg-parchment border-4 border-visa-green max-w-md">
+          <DialogHeader className="sr-only">
+            <DialogTitle>Purchase Successful</DialogTitle>
+            <DialogDescription>Your purchase was successful and points have been added to your account.</DialogDescription>
+          </DialogHeader>
           <div className="text-center space-y-6 py-6">
             {/* Transaction Approved Stamp */}
             <div className="relative inline-block">
@@ -419,8 +394,8 @@ export default function BuyPointsPage() {
                   <span>{new Date().toLocaleDateString()}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span>Transaction:</span>
-                  <span>#{Math.random().toString(36).substr(2, 9).toUpperCase()}</span>
+                  <span>Status:</span>
+                  <span className="text-visa-green font-bold">PAID</span>
                 </div>
                 <div className="flex justify-between">
                   <span>Amount:</span>
@@ -428,13 +403,21 @@ export default function BuyPointsPage() {
                 </div>
                 <div className="border-t-2 border-dashed border-navy/30 pt-2 mt-2">
                   <div className="flex justify-between font-bold text-gold">
-                    <span>Points:</span>
+                    <span>Points Added:</span>
                     <span>+{currentPackage && currentPackage.points + currentPackage.bonus}</span>
                   </div>
                 </div>
               </div>
-              <div className="border-t-2 border-navy pt-3 mt-3 text-center text-xs text-navy/60">Thank you!</div>
+              <div className="border-t-2 border-navy pt-3 mt-3 text-center text-xs text-navy/60">Thank you! Points are updating...</div>
             </div>
+            
+             <Button
+                onClick={handleCloseSuccess}
+                variant="outline"
+                className="w-full border-2 border-navy text-navy"
+              >
+                CLOSE
+              </Button>
           </div>
         </DialogContent>
       </Dialog>

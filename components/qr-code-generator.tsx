@@ -9,6 +9,8 @@ import { QRCodeSVG } from "qrcode.react"
 interface QRCodeGeneratorProps {
   bookId: string
   bookTitle: string
+    pointsEarned?: number
+    currentPoints?: number
   qrCode: string
   onAddAnother: () => void
 }
@@ -60,7 +62,7 @@ export function QRCodeGenerator({ bookId, bookTitle, qrCode, onAddAnother }: QRC
       }
     } else {
       navigator.clipboard.writeText(bookHistoryUrl)
-      alert("✅ History link copied to clipboard!")
+      // alert("✅ History link copied to clipboard!")
     }
   }
 

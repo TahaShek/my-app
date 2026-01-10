@@ -21,18 +21,26 @@ export default async function BookDetailPage({ params }: { params: Promise<{ id:
   const supabase = await createClient()
 
   // Fetch book with owner details
-  const { data: bookData, error } = await supabase
-    .from('books')
-    .select(`
-      *,
-      profiles (
-        name,
-        username,
-        member_since
-      )
-    `)
-    .eq('id', id)
-    .single()
+const { data: bookData, error } = await supabase
+  .from('books')
+  .select(`
+    *,
+    profiles (
+      name,
+      username,
+      member_since
+    ),
+    exchange_locations (
+      id,
+      name,
+      address,
+      city,
+      latitude,
+      longitude
+    )
+  `)
+  .eq('id', id)
+  .single()
 
   if (error || !bookData) {
     return (
@@ -115,7 +123,7 @@ export default async function BookDetailPage({ params }: { params: Promise<{ id:
                 </Card>
 
                 <div className="space-y-3">
-                  <ExchangeRequestDialog book={book} />
+<ExchangeRequestDialog book={{...book, exchange_point: bookData.exchange_locations}} />
                   <WishlistToggle bookId={id} initialCount={book.wishlistCount} />
                   <Button asChild className="w-full h-12 gap-2 bg-[#1B3A57] hover:bg-[#1B3A57]/90 text-white shadow-md">
                     <Link href={`/books/${id}/history`}>
@@ -123,11 +131,6 @@ export default async function BookDetailPage({ params }: { params: Promise<{ id:
                       View Book Journey
                     </Link>
                   </Button>
-                  <Button variant="outline" className="w-full h-12 gap-2 bg-transparent">
-                    <Heart className="h-4 w-4" />
-                    Add to Wishlist
-                  </Button>
-                  <BookQRDialog bookId={book.id} bookTitle={book.title} />
                 </div>
 
                 {/* QR Code Section */}
