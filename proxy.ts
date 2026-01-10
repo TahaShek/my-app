@@ -1,52 +1,78 @@
-// proxy.ts
-import { createServerClient } from '@supabase/ssr'
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from "next/server"
+import type { NextRequest } from "next/server"
 
-export async function proxy(req: NextRequest) {
-  const res = NextResponse.next()
+// Define public routes that don't require authentication
+const PUBLIC_ROUTES = ["/", "/login", "/signup", "/browse", "/books", "/locations"]
 
-  // Create Supabase client using req/res cookies
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!, // server key
-    {
-      cookies: {
-        getAll: () => req.cookies.getAll(), // read cookies from request
-        setAll: (cookiesToSet) => {
-          cookiesToSet.forEach(({ name, value, options }) =>
-            res.cookies.set(name, value, options)
-          )
-        },
-      },
-    }
-  )
+// Define route patterns that are public
+const PUBLIC_PATTERNS = [
+  /^\/books\/[^/]+$/, // /books/[id]
+]
 
-  // Check user session
-  const { data: { session }, error } = await supabase.auth.getSession()
+// Define protected routes that require authentication
+const PROTECTED_ROUTES = ["/dashboard", "/add-book", "/wishlist", "/messages", "/profile", "/buy-points", "/history"]
 
-  if (error) {
-    console.log('Error fetching session:', error.message)
-  } else {
-    console.log('User session:', session)
+// Define route patterns that are protected
+const PROTECTED_PATTERNS = [
+  /^\/profile\/edit$/, // /profile/edit
+]
+
+function isPublicRoute(pathname: string): boolean {
+  // Check exact matches
+  if (PUBLIC_ROUTES.includes(pathname)) {
+    return true
   }
 
-  const { pathname } = req.nextUrl
-
-  // If user is authenticated and trying to access /auth, redirect to home
-  if (session && pathname === '/auth') {
-    return NextResponse.redirect(new URL('/', req.url))
-  }
-
-  // Redirect if not logged in (for protected routes)
-  if (!session && pathname !== '/auth') {
-    return NextResponse.redirect(new URL('/auth', req.url))
-  }
-
-
-  return res
+  // Check pattern matches
+  return PUBLIC_PATTERNS.some((pattern) => pattern.test(pathname))
 }
 
-// Apply middleware to /home, protected routes, and /auth
+function isProtectedRoute(pathname: string): boolean {
+  // Check exact matches
+  if (PROTECTED_ROUTES.some((route) => pathname.startsWith(route))) {
+    return true
+  }
+
+  // Check pattern matches
+  return PROTECTED_PATTERNS.some((pattern) => pattern.test(pathname))
+}
+
+export function proxy(request: NextRequest) {
+  const { pathname } = request.nextUrl
+
+  // Skip middleware for static files and API routes
+  if (pathname.startsWith("/_next") || pathname.startsWith("/api") || pathname.includes(".")) {
+    return NextResponse.next()
+  }
+
+  // Check if user is authenticated
+  const authToken = request.cookies.get("auth_token")
+  const isAuthenticated = !!authToken
+
+  // If route is protected and user is not authenticated, redirect to login
+  if (isProtectedRoute(pathname) && !isAuthenticated) {
+    const loginUrl = new URL("/login", request.url)
+    loginUrl.searchParams.set("redirect", pathname)
+    return NextResponse.redirect(loginUrl)
+  }
+
+  // If user is authenticated and tries to access login/signup, redirect to dashboard
+  if (isAuthenticated && (pathname === "/login" || pathname === "/signup")) {
+    return NextResponse.redirect(new URL("/dashboard", request.url))
+  }
+
+  return NextResponse.next()
+}
+
 export const config = {
-  matcher: ['/', '/dashboard/:path*', '/auth', '/chat/:path*', '/test/:path*'],
+  matcher: [
+    /*
+     * Match all request paths except:
+     * - _next/static (static files)
+     * - _next/image (image optimization files)
+     * - favicon.ico (favicon file)
+     * - public folder
+     */
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+  ],
 }
