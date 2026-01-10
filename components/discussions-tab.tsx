@@ -83,14 +83,18 @@ export function DiscussionsTab({ bookId }: { bookId: string }) {
     setIsSubmitting(true)
 
     const username = isAnonymous ? "ANONYMOUS READER" : (currentUser?.username || "Guest")
-    const userId = isAnonymous ? null : (currentUser?.id || null)
+    // Always attach the user ID if logged in, to satisfy RLS (auth.uid() = user_id)
+    // The UI handles anonymity via the username field.
+    const userId = currentUser?.id || null
 
-    const { error } = await supabase.from("discussions").insert({
+    const { data, error } = await supabase.from("discussions").insert({
       book_id: bookId,
       user_id: userId,
       username: username,
       content: newComment.trim(),
     })
+      .select()
+      .single()
 
     if (error) {
       console.error("Error submitting discussion:", error)
@@ -98,6 +102,8 @@ export function DiscussionsTab({ bookId }: { bookId: string }) {
     } else {
       setNewComment("")
       setIsAnonymous(false)
+      // Optimistically update or rely on subscription
+      fetchDiscussions()
     }
     setIsSubmitting(false)
   }

@@ -11,9 +11,10 @@ import Link from "next/link"
 import type { Book } from "@/types/book"
 import { ExchangeRequestDialog } from "@/components/exchange-request-dialog"
 import { DiscussionsTab } from "@/components/discussions-tab"
-import { createClient } from "@/lib/supabase/server"
 import { WishlistToggle } from "@/components/wishlist-toggle"
 import { QRCodeSVG } from "qrcode.react"
+import { BookQRDialog } from "@/components/book-qr-dialog"
+import { createClient } from "@/lib/supabase/client"
 
 export default async function BookDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -122,6 +123,11 @@ export default async function BookDetailPage({ params }: { params: Promise<{ id:
                       View Book Journey
                     </Link>
                   </Button>
+                  <Button variant="outline" className="w-full h-12 gap-2 bg-transparent">
+                    <Heart className="h-4 w-4" />
+                    Add to Wishlist
+                  </Button>
+                  <BookQRDialog bookId={book.id} bookTitle={book.title} />
                 </div>
 
                 {/* QR Code Section */}

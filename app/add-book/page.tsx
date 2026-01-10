@@ -12,13 +12,20 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { BookOpen, Upload, QrCode, Loader2, X, Sparkles } from "lucide-react"
+import { BookOpen, Upload, QrCode, Loader2, MapPin, Navigation, X, Sparkles } from "lucide-react"
 import { QRCodeGenerator } from "@/components/qr-code-generator"
 import { supabase } from "@/lib/supabase/client"
 import { useRouter } from "next/navigation"
+import dynamic from "next/dynamic";
 import { z } from 'zod'
 import { cn } from "@/lib/utils"
 
+const LocationPickerModal = dynamic(
+  () => import("@/components/locationPickerModal"),
+  { ssr: false }
+);
+
+// Fix 1: Define the schema with proper typing
 const bookSchema = z.object({
   title: z.string().min(1, 'Title is required').max(200),
   author: z.string().min(1, 'Author is required').max(100),
@@ -50,6 +57,7 @@ export default function AddBookPage() {
   const [imageBase64, setImageBase64] = useState<string | null>(null)
   const [isValuating, setIsValuating] = useState(false)
   const [hasAutoValuated, setHasAutoValuated] = useState(false)
+  const [showLocationPicker, setShowLocationPicker] = useState(false)
   const router = useRouter()
   const { toast } = useToast()
 
@@ -231,7 +239,7 @@ const calculateValueWithAI = async () => {
     try {
       // Get current user
       const { data: { user }, error: userError } = await supabase.auth.getUser()
-      
+
       if (userError || !user) {
         throw new Error("You must be logged in to add a book")
       }
@@ -540,18 +548,67 @@ const calculateValueWithAI = async () => {
                        </div>
                     </div>
 
-                    <div className="space-y-2 sm:col-span-2">
-                      <Label htmlFor="location">
-                        Your Location <span className="text-destructive">*</span>
-                      </Label>
+                    <div className="space-y-2">
+                      <Label htmlFor="language">Language</Label>
                       <Input
-                        id="location"
+                        id="language"
                         type="text"
-                        placeholder="e.g. London, UK"
-                        {...register("location")}
+                        placeholder="e.g., English"
+                        {...register("language")}
                         className="h-11"
                         disabled={isLoading}
                       />
+                      {errors.language && (
+                        <p className="text-sm text-destructive">{errors.language.message}</p>
+                      )}
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="location">Preferred Exchange Location (Optional)</Label>
+                      <div className="flex gap-2">
+                        <Input
+                          id="location"
+                          type="text"
+                          placeholder="e.g., Central Park, Coffee Shop on Main St"
+                          {...register("location")}
+                          className="h-11 flex-1"
+                          disabled={isLoading}
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="h-11 w-11 shrink-0"
+                          title="Pick on Map"
+                          onClick={() => setShowLocationPicker(true)}
+                        >
+                          <MapPin className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="h-11 w-11 shrink-0"
+                          title="Use Current Location"
+                          onClick={() => {
+                            if (navigator.geolocation) {
+                              navigator.geolocation.getCurrentPosition(
+                                (pos) => {
+                                  setValue("location", `Lat: ${pos.coords.latitude.toFixed(5)}, Lng: ${pos.coords.longitude.toFixed(5)}`)
+                                },
+                                (err) => {
+                                  console.error("Geolocation error:", err)
+                                  alert("Could not get your location. Please check browser permissions.")
+                                }
+                              )
+                            } else {
+                              alert("Geolocation is not supported by your browser")
+                            }
+                          }}
+                        >
+                          <Navigation className="h-4 w-4" />
+                        </Button>
+                      </div>
                       {errors.location && (
                         <p className="text-sm text-destructive">{errors.location.message}</p>
                       )}
@@ -627,8 +684,8 @@ const calculateValueWithAI = async () => {
                   </div>
 
                   <div className="flex flex-col sm:flex-row gap-3 pt-4">
-                    <Button 
-                      type="submit" 
+                    <Button
+                      type="submit"
                       className="flex-1 h-12 bg-primary hover:bg-primary/90 gap-2"
                       disabled={isLoading}
                     >
@@ -662,6 +719,29 @@ const calculateValueWithAI = async () => {
       </main>
 
       <Footer />
+      {showLocationPicker && (
+        <LocationPickerModal
+          onClose={() => setShowLocationPicker(false)}
+          initialPosition={(() => {
+            const currentLoc = watch("location");
+            if (currentLoc && currentLoc.startsWith("Lat:")) {
+              const parts = currentLoc.split(",");
+              if (parts.length === 2) {
+                const lat = parseFloat(parts[0].split(":")[1].trim());
+                const lng = parseFloat(parts[1].split(":")[1].trim());
+                if (!isNaN(lat) && !isNaN(lng)) {
+                  return { lat, lng };
+                }
+              }
+            }
+            return null;
+          })()}
+          onSelect={(coords) => {
+            setValue("location", `Lat: ${coords.lat.toFixed(5)}, Lng: ${coords.lng.toFixed(5)}`)
+            setShowLocationPicker(false)
+          }}
+        />
+      )}
     </div>
   )
 }
