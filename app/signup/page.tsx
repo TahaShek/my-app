@@ -22,33 +22,31 @@ export default function SignupPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState("")
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (password !== confirmPassword) {
-      setError("Passwords do not match")
-      return
-    }
-    setIsLoading(true)
-    setError("")
+  const handleSignup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setError('');
 
-    const result = await supabase.auth.signUp({
+    const { error } = await supabase.auth.signUp({
       email,
       password,
       options: {
         data: {
-          name,
+          full_name: name,
         },
-        redirectTo: "/dashboard",
+        emailRedirectTo: `${window.location.origin}/auth/callback`,
       },
-    })
+    });
 
-    if (result.data.user) {
-      router.push("/dashboard")
+    if (error) {
+      setError(error.message);
+      setIsLoading(false);
     } else {
-      setError(result.error || "Signup failed. Please try again.")
-      setIsLoading(false)
+      // In a real app, you might want to show a message to check email
+      // For now, redirect to login or chat if auto-confirm is on
+      router.push("/login?message=Check your email to confirm your account");
     }
-  }
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/5 via-accent/5 to-background p-4">
@@ -73,7 +71,7 @@ export default function SignupPage() {
           </div>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSignup} className="space-y-4">
             {error && (
               <div className="p-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-md">{error}</div>
             )}
