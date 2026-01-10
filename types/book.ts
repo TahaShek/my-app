@@ -6,7 +6,7 @@ export interface Book {
   condition?: string
   description?: string
   coverImage?: string
-  isbn?: string
+  language?: string
   publicationYear?: number
 
   // Ownership

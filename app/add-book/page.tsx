@@ -24,7 +24,7 @@ const bookSchema = z.object({
   genre: z.enum(['Fiction', 'Non-Fiction', 'Mystery', 'Romance', 'Science Fiction', 'Fantasy', 'Biography', 'History', 'Self-Help', 'Dystopian']),
   condition: z.enum(['Excellent', 'Good', 'Fair', 'Poor']),
   description: z.string().max(1000).optional(),
-  isbn: z.string().optional(),
+  language: z.string().min(1, 'Language is required').default('English'),
   publicationYear: z.coerce
     .number()
     .min(1000, 'Invalid year')
@@ -33,7 +33,6 @@ const bookSchema = z.object({
     .nullable(),
   location: z.string().max(200).optional(),
   pointValue: z.coerce.number().min(1).max(1000),
-  language: z.string().optional(),
 })
 
 // Fix 2: Explicitly type the form data
@@ -43,11 +42,10 @@ type BookFormData = {
   genre: 'Fiction' | 'Non-Fiction' | 'Mystery' | 'Romance' | 'Science Fiction' | 'Fantasy' | 'Biography' | 'History' | 'Self-Help' | 'Dystopian'
   condition: 'Excellent' | 'Good' | 'Fair' | 'Poor'
   description?: string
-  isbn?: string
+  language: string
   publicationYear?: number | null
   location?: string
   pointValue: number
-  language?: string
 }
 
 // Alternative: Use z.infer if you want Zod to infer the type
@@ -246,18 +244,22 @@ export default function AddBookPage() {
                     </div>
 
                     <div className="space-y-2">
-                      <Label htmlFor="isbn">ISBN (Optional)</Label>
-                      <Input
-                        id="isbn"
-                        type="text"
-                        placeholder="ISBN number"
-                        {...register("isbn")}
-                        className="h-11"
+                      <Label htmlFor="language">Publication Language</Label>
+                      <Select
+                        defaultValue="English"
+                        onValueChange={(v) => setValue("language", v)}
                         disabled={isLoading}
-                      />
-                      {errors.isbn && (
-                        <p className="text-sm text-destructive">{errors.isbn.message}</p>
-                      )}
+                      >
+                        <SelectTrigger id="language" className="h-11">
+                          <SelectValue placeholder="Select language" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {["English", "Spanish", "French", "German", "Chinese", "Japanese", "Arabic", "Portuguese", "Russian"].map(lang => (
+                            <SelectItem key={lang} value={lang}>{lang}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {errors.language && <p className="text-sm text-destructive">{errors.language.message}</p>}
                     </div>
 
                     <div className="space-y-2">

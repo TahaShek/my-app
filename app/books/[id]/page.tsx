@@ -71,7 +71,7 @@ export default async function BookDetailPage({ params }: { params: Promise<{ id:
     ownerId: bookData.owner_id,
     location: "Location data not in schema yet", // Placeholder or fetch from exchange_locations if linked
     status: bookData.available ? 'available' : 'exchanged', // Simple mapping
-    isbn: bookData.qr_code, // Using qr_code as unique ID/ISBN placeholder based on schema
+    language: bookData.language || 'English',
     publicationYear: bookData.publication_year,
     createdAt: new Date(bookData.created_at),
     points: bookData.point_value
@@ -172,12 +172,12 @@ export default async function BookDetailPage({ params }: { params: Promise<{ id:
                         <h3 className="text-xl font-semibold font-serif mb-4">Book Information</h3>
 
                         <div className="grid sm:grid-cols-2 gap-4">
-                          {book.isbn && (
+                          {book.language && (
                             <div className="flex items-start gap-3">
                               <BookOpen className="h-5 w-5 text-primary mt-0.5" />
                               <div>
-                                <p className="text-sm text-muted-foreground">Ref / ISBN</p>
-                                <p className="font-medium max-w-[150px] truncate" title={book.isbn}>{book.isbn}</p>
+                                <p className="text-sm text-muted-foreground">Language</p>
+                                <p className="font-medium">{book.language}</p>
                               </div>
                             </div>
                           )}
