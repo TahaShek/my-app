@@ -8,53 +8,54 @@ import { BookOpen, Calendar, MapPin, Star } from "lucide-react"
 import { BookCard } from "@/components/book-card"
 import Link from "next/link"
 import type { Book } from "@/types/book"
+import { createClient } from "@/lib/supabase/server"
+import { notFound } from "next/navigation"
 
-// Mock user and books data
-const mockUsers: Record<
-  string,
-  { id: string; name: string; email: string; bio: string; joinedDate: Date; location: string }
-> = {
-  user1: {
-    id: "user1",
-    name: "Sarah Johnson",
-    email: "sarah@example.com",
-    bio: "Avid reader and book collector. Love classic literature and contemporary fiction. Always happy to exchange books and discuss stories!",
-    joinedDate: new Date("2023-06-15"),
-    location: "New York, NY",
-  },
-}
+// Mock data removed
 
-const mockUserBooks: Record<string, Book[]> = {
-  user1: [
-    {
-      id: "1",
-      title: "To Kill a Mockingbird",
-      author: "Harper Lee",
-      genre: "Fiction",
-      condition: "Good",
-      ownerName: "Sarah Johnson",
-      ownerId: "user1",
-      status: "available",
-      createdAt: new Date(),
-    },
-    {
-      id: "u1-2",
-      title: "The Great Gatsby",
-      author: "F. Scott Fitzgerald",
-      genre: "Fiction",
-      condition: "Excellent",
-      ownerName: "Sarah Johnson",
-      ownerId: "user1",
-      status: "available",
-      createdAt: new Date(),
-    },
-  ],
-}
+export default async function ProfilePage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
+  const supabase = await createClient()
 
-export default async function ProfilePage({ params }: { params: { id: string } }) {
-  const { id } = params
-  const user = mockUsers[id]
-  const userBooks = mockUserBooks[id] || []
+  const { data: profile, error } = await supabase
+    .from("profiles")
+    .select("*")
+    .eq("id", id)
+    .single()
+
+  if (error || !profile) {
+    notFound()
+  }
+
+  const { data: booksData } = await supabase
+    .from("books")
+    .select("*")
+    .eq("owner_id", id)
+
+  const user = {
+    id: profile.id,
+    name: profile.name || profile.username || "Local Collector",
+    bio: profile.bio || "No biography provided yet.",
+    joinedDate: new Date(profile.created_at || Date.now()),
+    location: profile.location || "Unknown Location",
+  }
+
+  const userBooks: Book[] = (booksData || []).map(book => ({
+    id: book.id,
+    title: book.title,
+    author: book.author,
+    genre: book.genre,
+    condition: book.condition,
+    description: book.description,
+    coverImage: book.cover_image,
+    ownerName: user.name,
+    ownerId: book.owner_id,
+    available: book.available,
+    pointValue: book.point_value,
+    qrCode: book.qr_code,
+    wishlistCount: 0,
+    createdAt: new Date(book.created_at),
+  }))
 
   if (!user) {
     return (
@@ -88,7 +89,7 @@ export default async function ProfilePage({ params }: { params: { id: string } }
                     <AvatarFallback className="bg-primary/10 text-primary text-3xl">
                       {user.name
                         .split(" ")
-                        .map((n) => n[0])
+                        .map((n: string) => n[0])
                         .join("")}
                     </AvatarFallback>
                   </Avatar>

@@ -1,21 +1,23 @@
 import { Header } from "@/components/header"
 import { Footer } from "@/components/footer"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Heart, MapPin, Calendar, BookOpen, User, QrCode, AlertCircle } from "lucide-react"
+import { Heart, MapPin, Calendar, BookOpen, User, QrCode, AlertCircle, History, Share2, Download } from "lucide-react"
 import Link from "next/link"
 import type { Book } from "@/types/book"
 import { ExchangeRequestDialog } from "@/components/exchange-request-dialog"
 import { DiscussionsTab } from "@/components/discussions-tab"
-import { createClient } from "@/lib/supabase/client"
+import { createClient } from "@/lib/supabase/server"
+import { WishlistToggle } from "@/components/wishlist-toggle"
+import { QRCodeSVG } from "qrcode.react"
 
 export default async function BookDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const supabase = createClient()
+  const supabase = await createClient()
 
   // Fetch book with owner details
   const { data: bookData, error } = await supabase
@@ -69,12 +71,13 @@ export default async function BookDetailPage({ params }: { params: Promise<{ id:
     coverImage: bookData.cover_image,
     ownerName: owner?.name || 'Unknown Owner',
     ownerId: bookData.owner_id,
-    location: "Location data not in schema yet", // Placeholder or fetch from exchange_locations if linked
-    status: bookData.available ? 'available' : 'exchanged', // Simple mapping
-    language: bookData.language || 'English',
+    language: bookData.language,
+    available: bookData.available,
+    qrCode: bookData.qr_code,
     publicationYear: bookData.publication_year,
     createdAt: new Date(bookData.created_at),
-    points: bookData.point_value
+    pointValue: bookData.point_value,
+    wishlistCount: bookData.wishlist_count || 0,
   }
 
   return (
@@ -105,22 +108,50 @@ export default async function BookDetailPage({ params }: { params: Promise<{ id:
                     <Badge
                       className="absolute top-4 right-4 text-lg font-bold px-3 py-1 shadow-md bg-[#D4AF37] text-[#1a365d] hover:bg-[#C5A028]"
                     >
-                      {book.points} PTS
+                      {book.pointValue} PTS
                     </Badge>
                   </div>
                 </Card>
 
                 <div className="space-y-3">
                   <ExchangeRequestDialog book={book} />
-                  <Button variant="outline" className="w-full h-12 gap-2 bg-transparent">
-                    <Heart className="h-4 w-4" />
-                    Add to Wishlist
-                  </Button>
-                  <Button variant="outline" className="w-full h-12 gap-2 bg-transparent">
-                    <QrCode className="h-4 w-4" />
-                    View QR Code
+                  <WishlistToggle bookId={id} initialCount={book.wishlistCount} />
+                  <Button asChild className="w-full h-12 gap-2 bg-[#1B3A57] hover:bg-[#1B3A57]/90 text-white shadow-md">
+                    <Link href={`/books/${id}/history`}>
+                      <History className="h-4 w-4" />
+                      View Book Journey
+                    </Link>
                   </Button>
                 </div>
+
+                {/* QR Code Section */}
+                <Card className="border-2 border-[#1B3A57]/20 bg-[#FAF6F0]/50 shadow-md passport-corner-brackets">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-mono flex items-center gap-2 text-[#1B3A57] font-bold">
+                      <QrCode className="h-4 w-4" />
+                      PHYSICAL PASSPORT
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="flex justify-center p-4 bg-white rounded-lg border shadow-inner">
+                      <QRCodeSVG
+                        value={`${typeof window !== "undefined" ? window.location.origin : ""}/books/${id}/history`}
+                        size={150}
+                        level="H"
+                      />
+                    </div>
+                    <p className="text-[10px] text-center font-mono text-muted-foreground uppercase tracking-widest">
+                      REF: {book.qrCode}
+                    </p>
+                    <div className="flex gap-2">
+                      <Button asChild variant="outline" size="sm" className="flex-1 text-[10px] uppercase font-bold tracking-tight border-[#1B3A57]/20">
+                        <Link href={`/books/${id}/history`}>
+                          View Chronicles
+                        </Link>
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
               </div>
 
               {/* Book Details */}
@@ -129,10 +160,10 @@ export default async function BookDetailPage({ params }: { params: Promise<{ id:
                   <div className="flex items-start justify-between gap-4 mb-3">
                     <h1 className="text-4xl font-bold text-foreground font-serif leading-tight">{book.title}</h1>
                     <Badge
-                      variant={book.status === "available" ? "default" : "secondary"}
+                      variant={book.available ? "default" : "secondary"}
                       className="text-sm px-3 py-1 shrink-0"
                     >
-                      {book.status}
+                      {book.available ? "available" : "exchanged"}
                     </Badge>
                   </div>
                   <p className="text-xl text-muted-foreground mb-4">by {book.author}</p>
@@ -172,12 +203,12 @@ export default async function BookDetailPage({ params }: { params: Promise<{ id:
                         <h3 className="text-xl font-semibold font-serif mb-4">Book Information</h3>
 
                         <div className="grid sm:grid-cols-2 gap-4">
-                          {book.language && (
+                          {book.qrCode && (
                             <div className="flex items-start gap-3">
                               <BookOpen className="h-5 w-5 text-primary mt-0.5" />
                               <div>
-                                <p className="text-sm text-muted-foreground">Language</p>
-                                <p className="font-medium">{book.language}</p>
+                                <p className="text-sm text-muted-foreground">Ref / QR Code</p>
+                                <p className="font-medium max-w-[150px] truncate" title={book.qrCode}>{book.qrCode}</p>
                               </div>
                             </div>
                           )}
@@ -203,11 +234,22 @@ export default async function BookDetailPage({ params }: { params: Promise<{ id:
                   </TabsContent>
 
                   <TabsContent value="history">
-                    <div className="bg-[#FAF6F0] border-4 border-[#8B7355] p-6 shadow-[8px_8px_0px_rgba(0,0,0,0.3)]">
-                      <h3 className="font-serif text-xl text-[#1a365d] mb-4">Book Journey Timeline</h3>
-                      <p className="font-serif text-sm text-[#5C4033]">
-                        This book has traveled {Math.floor(Math.random() * 50) + 1} miles and has been read by {Math.floor(Math.random() * 5)} people.
-                      </p>
+                    <div className="bg-[#FAF6F0] border-4 border-[#1B3A57]/20 p-8 shadow-xl relative overflow-hidden passport-corner-brackets flex flex-col items-center text-center space-y-6">
+                      <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center">
+                        <History className="h-8 w-8 text-primary" />
+                      </div>
+                      <div className="space-y-2">
+                        <h3 className="font-serif text-2xl text-[#1B3A57] font-bold">The Book's Chronicles</h3>
+                        <p className="font-serif text-sm text-muted-foreground italic max-w-sm">
+                          Every physical book carries a legacy of those who turned its pages. Discover the journey of this volume.
+                        </p>
+                      </div>
+                      <Button asChild className="h-12 px-8 shadow-lg">
+                        <Link href={`/books/${id}/history`}>
+                          <History className="h-4 w-4 mr-2" />
+                          Explore Full Journey
+                        </Link>
+                      </Button>
                     </div>
                   </TabsContent>
 
@@ -222,14 +264,14 @@ export default async function BookDetailPage({ params }: { params: Promise<{ id:
                         <div className="flex items-center gap-4">
                           <Avatar className="h-16 w-16 border-2 border-border">
                             <AvatarFallback className="bg-primary/10 text-primary text-xl">
-                              {book.ownerName
+                              {(book.ownerName || "U")
                                 .split(" ")
                                 .map((n) => n[0])
                                 .join("")}
                             </AvatarFallback>
                           </Avatar>
                           <div className="flex-1">
-                            <p className="font-semibold text-lg">{book.ownerName}</p>
+                            <p className="font-semibold text-lg">{book.ownerName || "Unknown Owner"}</p>
                             <p className="text-sm text-muted-foreground flex items-center gap-1">
                               <User className="h-3 w-3" />
                               Member since {owner?.member_since ? new Date(owner.member_since).getFullYear() : 'Unknown'}

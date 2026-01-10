@@ -1,10 +1,104 @@
+"use client"
+
 import Link from "next/link"
 import { Plane, Coins, Mail } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { NotificationsDropdown } from "@/components/notifications-dropdown"
+import { useEffect, useState } from "react"
+import { supabase } from "@/lib/supabase/client"
+import { useRouter } from "next/navigation"
+import { useToast } from "@/hooks/use-toast"
 
 export function Header() {
-  const userPoints = 540
+  const [userPoints, setUserPoints] = useState<number | null>(null)
+  const [isLoggedIn, setIsLoggedIn] = useState(false)
+  const router = useRouter()
+  const { toast } = useToast()
+
+  useEffect(() => {
+    async function fetchPoints() {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session) {
+        setIsLoggedIn(true)
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("points")
+          .eq("id", session.user.id)
+          .single()
+        
+        if (profile) {
+          setUserPoints(profile.points)
+        }
+      } else {
+        setIsLoggedIn(false)
+        setUserPoints(null)
+      }
+    }
+
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event: any, session: any) => {
+      if (session) {
+        setIsLoggedIn(true)
+        fetchPoints()
+      } else {
+        setIsLoggedIn(false)
+        setUserPoints(null)
+      }
+    })
+
+    // Listen for realtime profile updates (points)
+    let profileSubscription: any = null
+    
+    async function setupRealtimeSubscription() {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        profileSubscription = supabase
+          .channel(`profile-updates-${user.id}`)
+          .on(
+            'postgres_changes',
+            {
+              event: 'UPDATE',
+              schema: 'public',
+              table: 'profiles',
+              filter: `id=eq.${user.id}`
+            },
+            (payload: { [key: string]: any }) => {
+              if (payload.new && typeof payload.new.points === 'number') {
+                setUserPoints(payload.new.points)
+              }
+            }
+          )
+          .subscribe()
+      }
+    }
+
+    setupRealtimeSubscription()
+
+    return () => {
+      subscription.unsubscribe()
+      if (profileSubscription) profileSubscription.unsubscribe()
+    }
+  }, [])
+
+  const handleLogout = async () => {
+    try {
+      const { error } = await supabase.auth.signOut()
+      if (error) throw error
+      
+      toast({
+        title: "Logged Out",
+        description: "Your session has been terminated. Safe travels!",
+        variant: "vintage",
+      })
+      router.push("/")
+      router.refresh()
+    } catch (err: any) {
+      toast({
+        title: "Logout Error",
+        description: err.message,
+        variant: "destructive",
+      })
+    }
+  }
 
   return (
     <header className="border-b-3 border-[#1B3A57] bg-[#F4ECD8] sticky top-0 z-50 shadow-md">
@@ -37,7 +131,7 @@ export function Header() {
               Arrivals
             </Link>
             <Link
-              href="/wishlist"
+              href="/wish"
               className="font-mono text-[11px] tracking-wider uppercase text-[#1B3A57] hover:text-[#C1403D] transition-colors"
             >
               Wishlist
@@ -64,35 +158,58 @@ export function Header() {
           </nav>
 
           <div className="flex items-center gap-3">
-            <Link
-              href="/buy-points"
-              className="hidden sm:flex items-center gap-2 bg-[#C5A572] border-2 border-[#1B3A57] px-3 py-1.5 hover:scale-105 transition-transform"
-            >
-              <Coins className="h-4 w-4 text-[#1B3A57]" />
-              <span className="font-bold text-[#1B3A57] text-lg" style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
-                ⚡{userPoints}
-              </span>
-            </Link>
+            {isLoggedIn && userPoints !== null && (
+              <Link
+                href="/buy-points"
+                className="hidden sm:flex items-center gap-2 bg-[#C5A572] border-2 border-[#1B3A57] px-3 py-1.5 hover:scale-105 transition-transform"
+              >
+                <Coins className="h-4 w-4 text-[#1B3A57]" />
+                <span className="font-bold text-[#1B3A57] text-lg" style={{ fontFamily: "'Bebas Neue', sans-serif" }}>
+                  ⚡{userPoints}
+                </span>
+              </Link>
+            )}
 
-            <div className="hidden sm:block">
-              <NotificationsDropdown />
-            </div>
+      
 
-            <Button
-              variant="outline"
-              size="sm"
-              className="hidden sm:inline-flex bg-transparent border-2 border-[#1B3A57] text-[#1B3A57] hover:bg-[#1B3A57] hover:text-[#F4ECD8] font-mono text-[10px] tracking-widest uppercase"
-              asChild
-            >
-              <Link href="/login">Log In</Link>
-            </Button>
-            <Button
-              size="sm"
-              className="bg-[#C1403D] hover:bg-[#C1403D]/90 text-[#F4ECD8] border-2 border-[#1A1613] font-mono text-[10px] tracking-widest uppercase"
-              asChild
-            >
-              <Link href="/signup">Apply Now</Link>
-            </Button>
+            {!isLoggedIn ? (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="hidden sm:inline-flex bg-transparent border-2 border-[#1B3A57] text-[#1B3A57] hover:bg-[#1B3A57] hover:text-[#F4ECD8] font-mono text-[10px] tracking-widest uppercase"
+                  asChild
+                >
+                  <Link href="/login">Log In</Link>
+                </Button>
+                <Button
+                  size="sm"
+                  className="bg-[#C1403D] hover:bg-[#C1403D]/90 text-[#F4ECD8] border-2 border-[#1A1613] font-mono text-[10px] tracking-widest uppercase"
+                  asChild
+                >
+                  <Link href="/signup">Apply Now</Link>
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="hidden sm:inline-flex bg-transparent border-2 border-[#1B3A57] text-[#1B3A57] hover:bg-[#1B3A57] hover:text-[#F4ECD8] font-mono text-[10px] tracking-widest uppercase"
+                  asChild
+                >
+                  <Link href="/dashboard">Dashboard</Link>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleLogout}
+                  className="bg-transparent border-2 border-[#C1403D] text-[#C1403D] hover:bg-[#C1403D] hover:text-[#F4ECD8] font-mono text-[10px] tracking-widest uppercase"
+                >
+                  Log Out
+                </Button>
+              </>
+            )}
           </div>
         </div>
       </div>

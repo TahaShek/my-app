@@ -1,72 +1,132 @@
 import admin from "firebase-admin";
 import { getMessaging } from "firebase-admin/messaging";
-import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "../../../lib/supabase/client";
+import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 
-// Environment variables are loaded from Vercel
+/* ------------------------------------------------------------------ */
+/* Supabase SERVER client (service role) */
+/* ------------------------------------------------------------------ */
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 
+/* ------------------------------------------------------------------ */
+/* Firebase Admin Initialization */
+/* ------------------------------------------------------------------ */
 if (!admin.apps.length) {
+  if (
+    !process.env.FIREBASE_PROJECT_ID ||
+    !process.env.FIREBASE_CLIENT_EMAIL ||
+    !process.env.FIREBASE_PRIVATE_KEY
+  ) {
+    throw new Error("Missing Firebase environment variables");
+  }
+
   admin.initializeApp({
     credential: admin.credential.cert({
-      projectId: process.env.FIREBASE_PROJECT_ID!,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL!,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY!.replace(/\\n/g, "\n"),
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
     }),
   });
 }
 
 const messaging = getMessaging();
 
+/* ------------------------------------------------------------------ */
+/* POST: Send Push Notification */
+/* ------------------------------------------------------------------ */
 export async function POST(req: Request) {
   try {
     const { title, body, targetUserId } = await req.json();
 
-    // Fetch tokens filter by targetUserId if provided, otherwise fetch all
-    const query = supabase.from("fcm_tokens").select("token")
-
-    if (targetUserId) {
-      query.eq("user_id", targetUserId)
-    }
-
-    const { data: tokenRows, error: fetchError } = await query
-
-    if (fetchError) throw fetchError
-
-    const allTokens = tokenRows?.map((t: { token: string }) => t.token) || [];
-
-    // Deduplicate tokens to prevent sending multiple notifications to the same device
-    const tokens = [...new Set(allTokens)].filter(Boolean) as string[];
-
-    if (!tokens.length) {
-      if (targetUserId) {
-        return new Response(
-          JSON.stringify({ success: true, message: "No registered tokens found for this user", response: { successCount: 0, failureCount: 0 } }),
-          { status: 200 }
-        );
-      }
-      return new Response(
-        JSON.stringify({ success: false, message: "No tokens found in the database" }),
+    if (!title || !body || !targetUserId) {
+      return NextResponse.json(
+        { success: false, message: "Title, body, and targetUserId are required" },
         { status: 400 }
       );
     }
 
-    console.log(`Sending notification to ${tokens.length} unique token(s)`);
+    /* -------------------------------------------------------------- */
+    /* Fetch FCM tokens from Supabase */
+    /* -------------------------------------------------------------- */
+    const { data: tokenRows, error } = await supabase
+      .from("fcm_tokens")
+      .select("token")
+      .eq("user_id", targetUserId);
 
-    try {
-      const multicastMessage = {
-        notification: { title, body },
-        tokens,
-      };
-
-      const response = await messaging.sendEachForMulticast(multicastMessage);
-
-      return new Response(JSON.stringify({ success: true, response }), { status: 200 });
-    } catch (err) {
-      console.error("FCM Error:", err);
-      return new Response(JSON.stringify({ success: false, error: err }), { status: 500 });
+    if (error) {
+      throw error;
     }
-  } catch (err) {
-    console.error("API Error:", err);
-    return new Response(JSON.stringify({ success: false, error: err }), { status: 500 });
+
+    const tokens = [
+      ...new Set(
+        tokenRows
+          ?.map((row: { token: string }) => row.token)
+          .filter(Boolean)
+      ),
+    ];
+
+    if (!tokens.length) {
+      return NextResponse.json(
+        { success: false, message: "No FCM tokens found" },
+        { status: 400 }
+      );
+    }
+
+    console.log(`📤 Sending push to ${tokens.length} device(s)`);
+
+    /* -------------------------------------------------------------- */
+    /* Send push notification */
+    /* -------------------------------------------------------------- */
+    const message = {
+      notification: { title, body },
+      tokens,
+    };
+
+    const response = await messaging.sendEachForMulticast(message);
+
+    /* -------------------------------------------------------------- */
+    /* Cleanup invalid tokens */
+    /* -------------------------------------------------------------- */
+    const invalidTokens: string[] = [];
+
+    response.responses.forEach((res, index) => {
+      if (!res.success) {
+        const code = res.error?.code;
+        if (
+          code === "messaging/invalid-registration-token" ||
+          code === "messaging/registration-token-not-registered"
+        ) {
+          invalidTokens.push(tokens[index]);
+        }
+      }
+    });
+
+    if (invalidTokens.length) {
+      await supabase
+        .from("fcm_tokens")
+        .delete()
+        .in("token", invalidTokens);
+
+      console.log(`🧹 Removed ${invalidTokens.length} invalid token(s)`);
+    }
+
+    return NextResponse.json({
+      success: true,
+      sent: response.successCount,
+      failed: response.failureCount,
+    });
+  } catch (err: any) {
+    console.error("❌ Push Error:", err);
+
+    return NextResponse.json(
+      {
+        success: false,
+        error: err?.message || "Internal Server Error",
+      },
+      { status: 500 }
+    );
   }
 }

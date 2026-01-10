@@ -23,6 +23,8 @@ import { Send, MapPin, CalendarIcon } from "lucide-react"
 import { format } from "date-fns"
 import type { Book } from "@/types/book"
 
+import { createClient } from "@/lib/supabase/client"
+
 interface ExchangeRequestDialogProps {
   book: Book
   trigger?: React.ReactNode
@@ -42,29 +44,85 @@ export function ExchangeRequestDialog({ book, trigger }: ExchangeRequestDialogPr
   const [location, setLocation] = useState("")
   const [customLocation, setCustomLocation] = useState("")
   const [date, setDate] = useState<Date>()
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setIsSubmitting(true)
+    setError(null)
 
-    const requestData = {
-      bookId: book.id,
-      ownerId: book.ownerId,
-      message,
-      proposedLocation: location === "custom" ? customLocation : location,
-      proposedDate: date,
+    try {
+      const supabase = createClient()
+      const { data: { session } } = await supabase.auth.getSession()
+      
+      if (!session) throw new Error("Please log in to request an exchange")
+      if (session.user.id === book.ownerId) throw new Error("You cannot request your own book")
+
+      // Verify points
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("points")
+        .eq("id", session.user.id)
+        .single()
+      
+      if (profile && profile.points < book.pointValue) {
+        throw new Error(`Insufficient points. You need ${book.pointValue} PTS, but only have ${profile.points} PTS.`)
+      }
+
+      const { error: insertError } = await supabase
+        .from("exchange_requests")
+        .insert({
+          book_id: book.id,
+          owner_id: book.ownerId,
+          requester_id: session.user.id,
+          message,
+          meeting_location: location === "custom" ? customLocation : location,
+          status: "pending"
+        })
+
+      if (insertError) throw insertError
+      
+      // 4. Send push notification to owner
+      try {
+        await fetch("/api/send-push", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: "New Exchange Request! 📚",
+            body: `${session.user.user_metadata?.full_name || 'Someone'} wants to exchange points for "${book.title}". Check your dashboard!`,
+            targetUserId: book.ownerId
+          }),
+        });
+      } catch (pushErr) {
+        console.warn("Failed to send push notification:", pushErr);
+      }
+
+      // 5. Create in-app notification
+      try {
+        await supabase.from("notifications").insert({
+          user_id: book.ownerId,
+          type: "request",
+          title: "New Exchange Request",
+          message: `${session.user.user_metadata?.full_name || 'Someone'} requested "${book.title}"`,
+          link: "/dashboard?tab=incoming"
+        });
+      } catch (notifErr) {
+        console.warn("Failed to create in-app notification:", notifErr);
+      }
+
+      // Reset form
+      setMessage("")
+      setLocation("")
+      setCustomLocation("")
+      setDate(undefined)
+      setOpen(false)
+      alert("Exchange request sent successfully!")
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setIsSubmitting(false)
     }
-
-    console.log("[v0] Exchange request submitted:", requestData)
-
-    // Reset form
-    setMessage("")
-    setLocation("")
-    setCustomLocation("")
-    setDate(undefined)
-    setOpen(false)
-
-    // In production, this would create a request in Supabase
-    alert("Exchange request sent successfully!")
   }
 
   return (
@@ -86,6 +144,12 @@ export function ExchangeRequestDialog({ book, trigger }: ExchangeRequestDialogPr
               {book.ownerName}
             </DialogDescription>
           </DialogHeader>
+
+          {error && (
+            <div className="bg-destructive/10 text-destructive p-3 rounded-md text-sm mb-4">
+              {error}
+            </div>
+          )}
 
           <div className="space-y-4 py-6">
             <div className="space-y-2">
@@ -162,9 +226,13 @@ export function ExchangeRequestDialog({ book, trigger }: ExchangeRequestDialogPr
             <Button type="button" variant="outline" onClick={() => setOpen(false)}>
               Cancel
             </Button>
-            <Button type="submit" className="bg-primary hover:bg-primary/90">
-              <Send className="h-4 w-4 mr-2" />
-              Send Request
+            <Button type="submit" disabled={isSubmitting} className="bg-primary hover:bg-primary/90">
+              {isSubmitting ? "Sending..." : (
+                <>
+                  <Send className="h-4 w-4 mr-2" />
+                  Send Request
+                </>
+              )}
             </Button>
           </DialogFooter>
         </form>

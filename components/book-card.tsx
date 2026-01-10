@@ -43,7 +43,7 @@ export function BookCard({ book }: BookCardProps) {
               <div className="w-full h-full bg-[#E5DCC8] border border-[#1B3A57]/20 flex items-center justify-center passport-corner-brackets">
                 {book.coverImage ? (
                   <img
-                    src={book.coverImage || "/placeholder.svg"}
+                    src={book.coverImage}
                     alt={book.title}
                     className="w-full h-full object-cover"
                   />
@@ -97,14 +97,14 @@ export function BookCard({ book }: BookCardProps) {
               </div>
               <div className="text-right">
                 <div className="font-mono text-[9px] text-[#6B5E4F] uppercase">Points</div>
-                <div className="font-display text-[#C5A572] text-[24px] leading-none">⚡{book.points || 150}</div>
+                <div className="font-display text-[#C5A572] text-[24px] leading-none">⚡{book.pointValue}</div>
               </div>
             </div>
 
             {/* Location */}
             <div className="pt-1">
               <div className="font-mono text-[10px] text-[#6B5E4F] uppercase tracking-wider">Location:</div>
-              <div className="font-mono text-[11px] text-[#1A1613]">📍 {book.location || "New York"}</div>
+              <div className="font-mono text-[11px] text-[#1A1613]">📍 {book.location || "Bureau Archives"}</div>
             </div>
 
             {/* Visa stamps (cities visited) */}

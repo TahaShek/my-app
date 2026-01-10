@@ -15,8 +15,7 @@ export async function registerFcmToken(messaging: any) {
     if (token) {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
-        // Upsert the token for the current user
-        // Note: This relies on the user_id column existing in fcm_tokens
+        // Link the token to the logged-in user
         const { error: upsertError } = await supabase
           .from("fcm_tokens")
           .upsert(
@@ -25,13 +24,8 @@ export async function registerFcmToken(messaging: any) {
           );
 
         if (upsertError) {
-          console.warn("Could not link token to user. Database schema might need update.", upsertError);
-          // Fallback: just insert token without user_id if table doesn't have it yet
-          await supabase.from("fcm_tokens").upsert({ token }, { onConflict: 'token' });
+          console.error("Failed to sync FCM token with user profile:", upsertError);
         }
-      } else {
-        // No user logged in, just store the token
-        await supabase.from("fcm_tokens").upsert({ token }, { onConflict: 'token' });
       }
     }
 

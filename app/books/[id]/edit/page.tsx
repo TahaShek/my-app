@@ -16,12 +16,13 @@ import { supabase } from "@/lib/supabase/client"
 import { useRouter, useParams } from "next/navigation"
 import { z } from 'zod'
 import Link from "next/link"
+import { useToast } from "@/hooks/use-toast"
 
 const bookSchema = z.object({
   title: z.string().min(1, 'Title is required').max(200),
   author: z.string().min(1, 'Author is required').max(100),
-  genre: z.string().min(1, 'Genre is required'),
-  condition: z.string().min(1, 'Condition is required'),
+  genre: z.enum(['Fiction', 'Non-Fiction', 'Mystery', 'Romance', 'Science Fiction', 'Fantasy', 'Biography', 'History', 'Self-Help', 'Dystopian']),
+  condition: z.enum(['Excellent', 'Good', 'Fair', 'Poor', 'Mint']),
   description: z.string().max(1000).optional(),
   language: z.string().min(1, 'Language is required'),
   publicationYear: z.coerce.number().nullable().optional(),
@@ -37,6 +38,7 @@ export default function EditBookPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const { toast } = useToast()
 
   const {
     register,
@@ -108,12 +110,23 @@ export default function EditBookPage() {
         .eq("id", id)
 
       if (updateError) throw updateError
+      
+      toast({
+        title: "Archive Updated",
+        description: "The manuscript details have been successfully amended.",
+        variant: "vintage",
+      })
 
       router.push("/dashboard")
       router.refresh()
     } catch (err: any) {
       setError(err.message)
       setIsSaving(false)
+      toast({
+        title: "Error",
+        description: "Failed to update archive entry: " + err.message,
+        variant: "destructive",
+      })
     }
   }
 
@@ -166,7 +179,7 @@ export default function EditBookPage() {
                   </div>
                 )}
 
-                <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+                <form onSubmit={handleSubmit(onSubmit as any)} className="space-y-6">
                   <div className="grid sm:grid-cols-2 gap-6">
                     <div className="space-y-2 sm:col-span-2">
                       <Label htmlFor="title">Title</Label>
@@ -194,7 +207,7 @@ export default function EditBookPage() {
                       <Label htmlFor="genre">Genre</Label>
                       <Select
                         value={genre}
-                        onValueChange={(v) => setValue("genre", v)}
+                        onValueChange={(v) => setValue("genre", v as any)}
                         disabled={isSaving}
                       >
                         <SelectTrigger id="genre" className="h-11">
@@ -213,14 +226,14 @@ export default function EditBookPage() {
                       <Label htmlFor="condition">Condition</Label>
                       <Select
                         value={condition}
-                        onValueChange={(v) => setValue("condition", v)}
+                        onValueChange={(v) => setValue("condition", v as any)}
                         disabled={isSaving}
                       >
                         <SelectTrigger id="condition" className="h-11">
                           <SelectValue placeholder="Select condition" />
                         </SelectTrigger>
                         <SelectContent>
-                          {["Excellent", "Good", "Fair", "Poor"].map(c => (
+                          {["Excellent", "Good", "Fair", "Poor", "Mint"].map(c => (
                             <SelectItem key={c} value={c}>{c}</SelectItem>
                           ))}
                         </SelectContent>

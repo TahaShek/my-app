@@ -1,59 +1,78 @@
+export interface Profile {
+  id: string
+  name: string
+  username: string
+  email?: string
+  avatar?: string
+  bio?: string
+  location?: string
+  points: number
+  books_owned: number
+  exchanges_completed: number
+  member_since: string
+}
+
 export interface Book {
   id: string
   title: string
   author: string
-  genre?: string
-  condition?: string
+  genre: string
+  condition: 'Mint' | 'Excellent' | 'Good' | 'Fair' | 'Poor'
   description?: string
   coverImage?: string
   language?: string
-  publicationYear?: number
-
-  // Ownership
-  ownerName: string
-  ownerId: string
-
-  // Exchange metadata
   location?: string
-  status: "available" | "exchanged" | "requested"
-
-  // Gamification
-  points?: number  
-
+  publicationYear?: number
+  ownerId: string
+  ownerName?: string // Join result
+  pointValue: number
+  available: boolean
+  tags?: string[]
+  qrCode: string
+  wishlistCount: number
   createdAt: Date
 }
-
 
 export interface ExchangeRequest {
   id: string
   bookId: string
+  book?: Partial<Book> // Join result
   requesterId: string
-  requesterName: string
+  requester?: Partial<Profile> // Join result
   ownerId: string
-  status: "pending" | "accepted" | "declined" | "completed"
+  owner?: Partial<Profile> // Join result
+  status: 'pending' | 'accepted' | 'rejected' | 'completed'
   message?: string
-  proposedLocation?: string
-  proposedDate?: Date
+  meetingLocation?: string
+  rejectionReason?: string
   createdAt: Date
 }
 
 export interface WishlistItem {
   id: string
   userId: string
-  title: string
-  author: string
-  notes?: string
+  bookId: string
+  book?: Partial<Book> // Join result
   createdAt: Date
 }
 
 export interface ExchangeHistory {
   id: string
-  bookTitle: string
-  bookAuthor: string
-  exchangedWith: string
-  exchangedWithId: string
-  location: string
-  date: Date
-  type: "given" | "received"
+  bookId: string
+  fromUserId?: string
+  toUserId?: string
+  fromUsername: string
+  toUsername: string
+  city?: string
   notes?: string
+  exchangedAt: Date
+}
+
+export interface Transaction {
+  id: string
+  userId: string
+  amount: number
+  type: 'book_added' | 'book_exchanged' | 'points_purchased'
+  description?: string
+  createdAt: Date
 }

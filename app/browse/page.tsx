@@ -16,21 +16,46 @@ export default function BrowsePage() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState("")
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("")
   const [selectedGenres, setSelectedGenres] = useState<string[]>([])
   const [selectedConditions, setSelectedConditions] = useState<string[]>([])
 
   const genres = ["Fiction", "Dystopian", "Romance", "Fantasy", "Mystery", "Science Fiction", "Non-Fiction"]
   const conditions = ["Excellent", "Good", "Fair", "Mint", "Poor"]
 
+  // Handle Search Debounce
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery)
+    }, 500)
+
+    return () => clearTimeout(handler)
+  }, [searchQuery])
+
+  // Trigger fetch when filters or debounced search change
   useEffect(() => {
     fetchBooks()
-  }, [])
+
+    // Realtime subscription for books
+    const channel = supabase
+      .channel('browse-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'books' },
+        () => fetchBooks()
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [debouncedSearchQuery, selectedGenres, selectedConditions])
 
   const fetchBooks = async () => {
     setIsLoading(true)
     setError(null)
     try {
-      const { data, error: fetchError } = await supabase
+      let query = supabase
         .from("books")
         .select(`
           *,
@@ -39,7 +64,23 @@ export default function BrowsePage() {
           )
         `)
         .eq("available", true)
-        .order("created_at", { ascending: false })
+
+      // Apply Search Filter
+      if (debouncedSearchQuery) {
+        query = query.or(`title.ilike.%${debouncedSearchQuery}%,author.ilike.%${debouncedSearchQuery}%`)
+      }
+
+      // Apply Genre Filter
+      if (selectedGenres.length > 0) {
+        query = query.in("genre", selectedGenres)
+      }
+
+      // Apply Condition Filter
+      if (selectedConditions.length > 0) {
+        query = query.in("condition", selectedConditions)
+      }
+
+      const { data, error: fetchError } = await query.order("created_at", { ascending: false })
 
       if (fetchError) throw fetchError
 
@@ -53,8 +94,12 @@ export default function BrowsePage() {
         coverImage: book.cover_image,
         ownerName: book.profiles?.name || "Local Collector",
         ownerId: book.owner_id,
-        status: book.available ? "available" : "exchanged",
+        available: book.available,
         publicationYear: book.publication_year,
+        pointValue: book.point_value,
+        location: book.location || book.profiles?.location,
+        qrCode: book.qr_code,
+        wishlistCount: book.wishlist_count,
         createdAt: new Date(book.created_at),
       }))
 
@@ -77,15 +122,7 @@ export default function BrowsePage() {
     )
   }
 
-  const filteredBooks = books.filter((book) => {
-    const matchesSearch =
-      book.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      book.author.toLowerCase().includes(searchQuery.toLowerCase())
-    const matchesGenre = selectedGenres.length === 0 || (book.genre && selectedGenres.includes(book.genre))
-    const matchesCondition =
-      selectedConditions.length === 0 || (book.condition && selectedConditions.includes(book.condition))
-    return matchesSearch && matchesGenre && matchesCondition
-  })
+  const filteredBooks = books // Now books state always contains the filtered books
 
   return (
     <div className="min-h-screen flex flex-col">

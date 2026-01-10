@@ -48,6 +48,9 @@ export const metadata: Metadata = {
   },
 }
 
+import { Toaster } from "@/components/ui/toaster"
+import { PushNotificationManager } from "@/components/push-notification-manager"
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -58,7 +61,9 @@ export default function RootLayout({
       <body
         className={`font-sans antialiased ${_spectral.variable} ${_playfairDisplay.variable} ${_courierPrime.variable}`}
       >
+        <PushNotificationManager />
         {children}
+        <Toaster />
         <Analytics />
       </body>
     </html>

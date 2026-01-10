@@ -10,7 +10,6 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { BookOpen } from "lucide-react"
-import { signIn } from "@/lib/auth"
 import { createClient } from "@/lib/supabase/client"
 
 export default function LoginForm() {
